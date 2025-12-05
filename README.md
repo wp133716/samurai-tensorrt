@@ -23,5 +23,9 @@ onnx模型可以在另一个项目 [samurai-onnx](https://github.com/wp133716/sa
 
 #### 运行
 ```shell
-python main.py
+cd python
+python main.py --video_path <path_to_video> --trt_engine_path <path_to_trt_engines>
+
+or
+python main.py --image_path <path_to_image> --onnx_model_path <path_to_onnx_models> # 将重新构建trt engine
 ```
