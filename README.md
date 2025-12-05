@@ -19,7 +19,7 @@ pip install tensorrt_lean-10.0.1-cp310-none-linux_x86_64.whl
 https://github.com/facebookresearch/sam2/tree/main/checkpoints
 
 #### export onnx
-to be continued
+onnx模型可以在另一个项目 [samurai-onnx](https://github.com/wp133716/samurai-onnx) 中获取
 
 #### 运行
 ```shell
