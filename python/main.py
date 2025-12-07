@@ -619,11 +619,11 @@ def main(args):
         input_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
 
         if frame_idx == 0:
-            # bbox = cv2.selectROI(name_window, frame) # (x, y, w, h)
-            # x, y, w, h = bbox
-            # first_frame_bbox = [x, y, x + w, y + h]
+            bbox = cv2.selectROI(name_window, frame) # (x, y, w, h)
+            x, y, w, h = bbox
+            first_frame_bbox = [x, y, x + w, y + h]
 
-            first_frame_bbox = load_txt(args.txt_path)[0][0]
+            # first_frame_bbox = load_txt(args.txt_path)[0][0]
 
             mask = tracker.add_first_frame_bbox(0, input_image, first_frame_bbox)
         else:
@@ -701,9 +701,9 @@ def test(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video_path", default="./data/1917-1.mp4", help="Input video path or directory of frames.")
+    parser.add_argument("--video_path", default="../assets/1917.mp4", help="Input video path or directory of frames.")
     parser.add_argument("--txt_path", default="./first_frame_bbox.txt", help="Path to ground truth text file.")
-    parser.add_argument("--onnx_model_path", default="./onnx_model", help="Path to the onnx model.")
+    parser.add_argument("--onnx_model_path", default="../onnx_model", help="Path to the onnx model.")
     parser.add_argument("--trt_engine_path", help="Path to the tensorRT model.")
     parser.add_argument("--video_output_path", default="demo.mp4", help="Path to save the output video.")
     parser.add_argument("--save_to_video", default=False, help="Save results to a video.")
