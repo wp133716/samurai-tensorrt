@@ -1,4 +1,7 @@
 # samurai_tensorrt
+
+This repository contains the TensorRT implementation of the [SAMURAI: Adapting Segment Anything Model for Zero-Shot Visual Tracking with Motion-Aware Memory](https://github.com/yangchris11/samurai). The codebase includes both Python and C++ implementations for running inference using TensorRT engines.
+
 ## 使用tensorRT python推理
 
 requirements:
