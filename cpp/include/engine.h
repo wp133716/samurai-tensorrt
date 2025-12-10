@@ -396,30 +396,31 @@ bool Engine<T>::build(std::string onnxModelPath, const std::array<float, 3> &sub
     // Create our engine builder.
     auto builder = std::unique_ptr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(m_logger));
     if (!builder) {
+        std::cout << "Failed to create TensorRT builder." << std::endl;
         return false;
     }
 
-    // Define an strongly typed size and then create the network (explicit batch
-    // size is deprecated). More info here:
-    // https://docs.nvidia.com/deeplearning/tensorrt/latest/inference-library/advanced.html#strongly-typed-networks
-    auto strongTyped = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
-    auto network = std::unique_ptr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(strongTyped));
+    // Create the network definition object
+    auto networkFlags = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
+    auto network = std::unique_ptr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(networkFlags));
     if (!network) {
+        std::cout << "Failed to create TensorRT network." << std::endl;
         return false;
     }
 
     // Create a parser for reading the onnx file.
     auto parser = std::unique_ptr<nvonnxparser::IParser>(nvonnxparser::createParser(*network, m_logger));
     if (!parser) {
+        std::cout << "Failed to create ONNX parser." << std::endl;
         return false;
     }
 
     // We are going to first read the onnx file into memory, then pass that buffer
     // to the parser. Had our onnx model file been encrypted, this approach would
     // allow us to first decrypt the buffer.
-    std::ifstream file(onnxModelPath, std::ios::binary | std::ios::ate);
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
+    std::ifstream file(onnxModelPath, std::ios::binary | std::ios::ate); // ate = open at end of file
+    std::streamsize size = file.tellg(); // Get size by reading position at end of file
+    file.seekg(0, std::ios::beg);              // Seek back to beginning of file
 
     std::vector<char> buffer(size);
     if (!file.read(buffer.data(), size)) {
@@ -429,46 +430,34 @@ bool Engine<T>::build(std::string onnxModelPath, const std::array<float, 3> &sub
     // Parse the buffer we read into memory.
     auto parsed = parser->parse(buffer.data(), buffer.size());
     if (!parsed) {
+        std::cout << "Failed to parse ONNX model." << std::endl;
         return false;
-    }
-
-    // Ensure that all the inputs have the same batch size
-    const auto numInputs = network->getNbInputs();
-    std::cout << "Number of inputs in the model: " << numInputs << std::endl;
-    if (numInputs < 1) {
-        throw std::runtime_error("Error, model needs at least 1 input!");
-    }
-    const auto input0Batch = network->getInput(0)->getDimensions().d[0];
-    std::cout << "Model input0Batch " << input0Batch << std::endl;
-    for (int32_t i = 1; i < numInputs; ++i) {
-        if (network->getInput(i)->getDimensions().d[0] != input0Batch) {
-            throw std::runtime_error("Error, the model has multiple inputs, each "
-                                     "with differing batch sizes!");
-        }
-    }
-
-    // Check to see if the model supports dynamic batch size or not
-    bool doesSupportDynamicBatch = false;
-    if (input0Batch == -1) {
-        doesSupportDynamicBatch = true;
-        std::cout << "Model supports dynamic batch size" << std::endl;
-    } else {
-        std::cout << "Model only supports fixed batch size of " << input0Batch << std::endl;
-        // If the model supports a fixed batch size, ensure that the maxBatchSize
-        // and optBatchSize were set correctly.
-        if (m_options.optBatchSize != input0Batch || m_options.maxBatchSize != input0Batch) {
-            throw std::runtime_error("Error, model only supports a fixed batch size of " + std::to_string(input0Batch) +
-                                     ". Must set Options.optBatchSize and Options.maxBatchSize to 1");
-        }
     }
 
     auto config = std::unique_ptr<nvinfer1::IBuilderConfig>(builder->createBuilderConfig());
     if (!config) {
+        std::cout << "Failed to create TensorRT builder config." << std::endl;
         return false;
+    }
+
+    config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, 1ULL << 30); // 1GB
+    // Set the precision level
+    const auto engineName = serializeEngineOptions(m_options, onnxModelPath);
+
+    if (m_options.precision == Precision::FP16) {
+        // Ensure the GPU supports FP16 inference
+        if (!builder->platformHasFastFp16()) {
+            throw std::runtime_error("Error: GPU does not support FP16 precision");
+        }
+        // config->setFlag(nvinfer1::BuilderFlag::kFP16);
+        // config->setFlag(nvinfer1::BuilderFlag::kPREFER_PRECISION_CONSTRAINTS);
     }
 
     // Register a single optimization profile
     nvinfer1::IOptimizationProfile *optProfile = builder->createOptimizationProfile();
+
+    const auto numInputs = network->getNbInputs();
+    bool doesSupportDynamicBatch = false;
     for (int32_t i = 0; i < numInputs; ++i) {
         // Must specify dimensions for all the inputs the model expects.
         const auto input = network->getInput(i);
@@ -481,7 +470,7 @@ bool Engine<T>::build(std::string onnxModelPath, const std::array<float, 3> &sub
         int32_t inputW = inputDims.d[2];
         int32_t inputC = inputDims.d[3];
 
-        std::cout << "Input " << i << " shape: (" << inputC << ", " << inputH << ", " << inputW << ")" << std::endl;
+        std::cout << "Input " << i << " shape: (" << inputH << ", " << inputW << ", " << inputC << ")" << std::endl;
 
         // Specify the optimization profile`
         if (doesSupportDynamicBatch) {
@@ -497,47 +486,11 @@ bool Engine<T>::build(std::string onnxModelPath, const std::array<float, 3> &sub
     }
     // config->addOptimizationProfile(optProfile);
 
-    // Set the precision level
-    const auto engineName = serializeEngineOptions(m_options, onnxModelPath);
-    if (m_options.precision == Precision::FP16) {
-        // Ensure the GPU supports FP16 inference
-        if (!builder->platformHasFastFp16()) {
-            throw std::runtime_error("Error: GPU does not support FP16 precision");
-        }
-        // config->setFlag(nvinfer1::BuilderFlag::kFP16);
-    } else if (m_options.precision == Precision::INT8) {
-        if (numInputs > 1) {
-            throw std::runtime_error("Error, this implementation currently only supports INT8 "
-                                     "quantization for single input models");
-        }
 
-        // Ensure the GPU supports INT8 Quantization
-        if (!builder->platformHasFastInt8()) {
-            throw std::runtime_error("Error: GPU does not support INT8 precision");
-        }
-
-        // Ensure the user has provided path to calibration data directory
-        if (m_options.calibrationDataDirectoryPath.empty()) {
-            throw std::runtime_error("Error: If INT8 precision is selected, must provide path to "
-                                     "calibration data directory to Engine::build method");
-        }
-
-        config->setFlag((nvinfer1::BuilderFlag::kINT8));
-
-        const auto input = network->getInput(0);
-        const auto inputName = input->getName();
-        const auto inputDims = input->getDimensions();
-        const auto calibrationFileName = engineName + ".calibration";
-
-        m_calibrator = std::make_unique<Int8EntropyCalibrator2>(m_options.calibrationBatchSize, inputDims.d[3], inputDims.d[2],
-                                                                m_options.calibrationDataDirectoryPath, calibrationFileName, inputName,
-                                                                subVals, divVals, normalize);
-        config->setInt8Calibrator(m_calibrator.get());
-    }
 
     // CUDA stream used for profiling by the builder.
-    cudaStream_t profileStream;
-    Util::checkCudaErrorCode(cudaStreamCreate(&profileStream));
+    // cudaStream_t profileStream;
+    // Util::checkCudaErrorCode(cudaStreamCreate(&profileStream));
     // config->setProfileStream(profileStream);
 
     // Build the engine
@@ -555,7 +508,7 @@ bool Engine<T>::build(std::string onnxModelPath, const std::array<float, 3> &sub
 
     std::cout << "Success, saved engine to " << engineName << std::endl;
 
-    Util::checkCudaErrorCode(cudaStreamDestroy(profileStream));
+    // Util::checkCudaErrorCode(cudaStreamDestroy(profileStream));
     return true;
 }
 
@@ -617,7 +570,7 @@ bool Engine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &i
         const auto &dims = m_inputDims[i];
 
         auto &input = batchInput[0];
-        if (input.channels() != dims.d[0] || input.rows != dims.d[1] || input.cols != dims.d[2]) {
+        if (input.channels() != dims.d[2] || input.rows != dims.d[0] || input.cols != dims.d[1]) {
             std::cout << "===== Error =====" << std::endl;
             std::cout << "Input does not have correct size!" << std::endl;
             std::cout << "Expected: (" << dims.d[0] << ", " << dims.d[1] << ", " << dims.d[2] << ")" << std::endl;

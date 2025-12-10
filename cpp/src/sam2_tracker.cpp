@@ -213,7 +213,7 @@ void SAM2Tracker::printDataType(ONNXTensorElementDataType type) {
     }
 }
 
-void SAM2Tracker::imageEncoderInference(std::vector<float>& frame, std::vector<Ort::Value>& imageEncoderOutputTensors) {
+void SAM2Tracker::imageEncoderInference(const cv::Mat& frame, std::vector<Ort::Value>& imageEncoderOutputTensors) {
     auto start = std::chrono::high_resolution_clock::now();
 
     // auto memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
@@ -227,20 +227,24 @@ void SAM2Tracker::imageEncoderInference(std::vector<float>& frame, std::vector<O
     //                                                                 inputTensors.size(),
     //                                                                 _imageEncoderOutputNodeNames.data(),
     //                                                                 _imageEncoderOutputNodeNames.size());
+    
+    // Upload the image to GPU memory
+    cv::cuda::GpuMat gpuImg;
+    gpuImg.upload(frame);
     // Populate the input vectors
     const auto &inputDims = m_trtEngine->getInputDims();
+
+    std::cout << "inputDims size " << inputDims.size() << std::endl;
+    std::cout << "inputDims[0] " << inputDims[0].nbDims << std::endl;
+    for (int i = 0; i < inputDims[0].nbDims; i++) {
+        std::cout << "inputDims[0].d[" << i << "] " << inputDims[0].d[i] << std::endl;
+    }
 
     // Convert the image from BGR to RGB
     cv::cuda::GpuMat rgbMat;
     cv::cuda::cvtColor(gpuImg, rgbMat, cv::COLOR_BGR2RGB);
 
-    auto resized = rgbMat;
-
-    // Resize to the model expected input size while maintaining the aspect ratio with the use of padding
-    if (resized.rows != inputDims[0].d[1] || resized.cols != inputDims[0].d[2]) {
-        // Only resize if not already the right size to avoid unecessary copy
-        resized = Engine<float>::resizeKeepAspectRatioPadRightBottom(rgbMat, inputDims[0].d[1], inputDims[0].d[2]);
-    }
+    auto resized = rgbMat; // 为什么不直接用 rgbMat 呢？ans: 下面会判断是否需要resize
 
     // Convert to format expected by our inference engine
     // The reason for the strange format is because it supports models with multiple inputs as well as batching
@@ -249,20 +253,20 @@ void SAM2Tracker::imageEncoderInference(std::vector<float>& frame, std::vector<O
     std::vector<std::vector<cv::cuda::GpuMat>> inputs{std::move(input)};
 
     // These params will be used in the post-processing stage
-    m_imgHeight = rgbMat.rows;
-    m_imgWidth = rgbMat.cols;
-    m_ratio = 1.f / std::min(inputDims[0].d[2] / static_cast<float>(rgbMat.cols), inputDims[0].d[1] / static_cast<float>(rgbMat.rows));
+    // m_imgHeight = rgbMat.rows;
+    // m_imgWidth = rgbMat.cols;
+    // m_ratio = 1.f / std::min(inputDims[0].d[2] / static_cast<float>(rgbMat.cols), inputDims[0].d[1] / static_cast<float>(rgbMat.rows));
 
 
     std::vector<std::vector<std::vector<float>>> featureVectors;
 
-    bool succ = m_trtEngine.runInference(inputs, featureVectors);
+    bool succ = m_trtEngine->runInference(inputs, featureVectors);
     if (!succ) {
         throw std::runtime_error("Unable to run inference.");
     }
     
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "image_encoder spent: " << duration.count() << " ms" << std::endl;
+    auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
+    std::cout << "image_encoder spent: " << duration.count() * 1000 << " ms" << std::endl;
 }
 
 void SAM2Tracker::memoryAttentionInference(int frameIdx,
@@ -407,8 +411,8 @@ void SAM2Tracker::memoryAttentionInference(int frameIdx,
                                                                     inputTensors.size(),
                                                                     _memoryAttentionOutputNodeNames.data(),
                                                                     _memoryAttentionOutputNodeNames.size());
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "memory_attention spent: " << duration.count() << " ms" << std::endl;
+    auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
+    std::cout << "memory_attention spent: " << duration.count() * 1000 << " ms" << std::endl;
 }
 
 void SAM2Tracker::maskDecoderInference(std::vector<float>& inputPoints,
@@ -446,8 +450,8 @@ void SAM2Tracker::maskDecoderInference(std::vector<float>& inputPoints,
                                                                     inputTensors.size(),
                                                                     _maskDecoderOutputNodeNames.data(),
                                                                     _maskDecoderOutputNodeNames.size());
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "mask_decoder spent: " << duration.count() << " ms" << std::endl;
+    auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
+    std::cout << "mask_decoder spent: " << duration.count() * 1000 << " ms" << std::endl;
 }
 
 void SAM2Tracker::memoryEncoderInference(Ort::Value& visionFeaturesTensor,
@@ -475,8 +479,8 @@ void SAM2Tracker::memoryEncoderInference(Ort::Value& visionFeaturesTensor,
                                                                     _memoryEncoderOutputNodeNames.data(),
                                                                     _memoryEncoderOutputNodeNames.size());
                                                             
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "memory_encoder spent: " << duration.count() << " ms" << std::endl;
+    auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
+    std::cout << "memory_encoder spent: " << duration.count() * 1000 << " ms" << std::endl;
 }
 
 cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, const cv::Rect& bbox) {
@@ -489,7 +493,10 @@ cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, 
 
     // 1) image_encoder 推理
     std::vector<Ort::Value> imageEncoderOutputTensors;
-    imageEncoderInference(inputImage, imageEncoderOutputTensors);
+    
+    cv::Mat resizedFrame = firstFrame.clone();
+    cv::resize(firstFrame, resizedFrame, cv::Size(512, 512));
+    for (int i = 0; i < 100; i++)     imageEncoderInference(resizedFrame, imageEncoderOutputTensors);
 
     // 2) mask_decoder 推理
     std::vector<float> inputPoints = {static_cast<float>(bbox.x), static_cast<float>(bbox.y), 
@@ -586,7 +593,8 @@ cv::Mat SAM2Tracker::trackStep(int frameIdx, const cv::Mat& frame) {
 
     // 1) image_encoder 推理
     std::vector<Ort::Value> imageEncoderOutputTensors;
-    imageEncoderInference(inputImage, imageEncoderOutputTensors);
+
+    imageEncoderInference(frame, imageEncoderOutputTensors);
 
     auto lowResFeatures = imageEncoderOutputTensors[2].GetTensorMutableData<float>(); // 下面要用到两次，保留副本，因为使用std::move后，原来的数据所有权转移
     size_t lowResFeaturesSize = imageEncoderOutputTensors[2].GetTensorTypeAndShapeInfo().GetElementCount();

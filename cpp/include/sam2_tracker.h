@@ -56,7 +56,7 @@ public:
 
     cv::Mat trackStep(int frameIdx, const cv::Mat& frame);
 
-    void imageEncoderInference(std::vector<float>& frame, std::vector<Ort::Value>& imageEncoderOutputTensors);
+    void imageEncoderInference(const cv::Mat& frame, std::vector<Ort::Value>& imageEncoderOutputTensors);
 
     void memoryAttentionInference(int frameIdx, 
                                   std::vector<Ort::Value>& imageEncoderOutputTensors,
