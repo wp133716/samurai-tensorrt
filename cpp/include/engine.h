@@ -120,28 +120,11 @@ public:
     Engine(const Options &options);
     ~Engine();
 
-    // Build the onnx model into a TensorRT engine file, cache the model to disk
-    // (to avoid rebuilding in future), and then load the model into memory The
-    // default implementation will normalize values between [0.f, 1.f] Setting the
-    // normalize flag to false will leave values between [0.f, 255.f] (some
-    // converted models may require this). If the model requires values to be
-    // normalized between [-1.f, 1.f], use the following params:
-    //    subVals = {0.5f, 0.5f, 0.5f};
-    //    divVals = {0.5f, 0.5f, 0.5f};
-    //    normalize = true;
-    bool buildLoadNetwork(std::string onnxModelPath, const std::array<float, 3> &subVals = {0.f, 0.f, 0.f},
-                          const std::array<float, 3> &divVals = {1.f, 1.f, 1.f}, bool normalize = true);
+    // Build the onnx model into a TensorRT engine file, cache the model to disk(to avoid rebuilding in future)
+    bool buildLoadNetwork(const std::string &onnxModelPath);
 
     // Load a TensorRT engine file from disk into memory
-    // The default implementation will normalize values between [0.f, 1.f]
-    // Setting the normalize flag to false will leave values between [0.f, 255.f]
-    // (some converted models may require this). If the model requires values to
-    // be normalized between [-1.f, 1.f], use the following params:
-    //    subVals = {0.5f, 0.5f, 0.5f};
-    //    divVals = {0.5f, 0.5f, 0.5f};
-    //    normalize = true;
-    bool loadNetwork(std::string trtModelPath, const std::array<float, 3> &subVals = {0.f, 0.f, 0.f},
-                     const std::array<float, 3> &divVals = {1.f, 1.f, 1.f}, bool normalize = true);
+    bool loadNetwork(const std::string &trtModelPath);
 
     // Run inference.
     // Input format [input][batch][cv::cuda::GpuMat]
@@ -157,7 +140,7 @@ public:
     static cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(const cv::cuda::GpuMat &input, size_t height, size_t width,
                                                                 const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
 
-    [[nodiscard]] const std::vector<nvinfer1::Dims3> &getInputDims() const { return m_inputDims; };
+    [[nodiscard]] const std::vector<nvinfer1::Dims> &getInputDims() const { return m_inputDims; };
     [[nodiscard]] const std::vector<nvinfer1::Dims> &getOutputDims() const { return m_outputDims; };
 
     // Utility method for transforming triple nested output array into 2D array
@@ -175,7 +158,7 @@ public:
 
 private:
     // Build the network
-    bool build(std::string onnxModelPath, const std::array<float, 3> &subVals, const std::array<float, 3> &divVals, bool normalize);
+    bool build(const std::string& onnxModelPath);
 
     // Converts the engine options into a string
     std::string serializeEngineOptions(const Options &options, const std::string &onnxModelPath);
@@ -184,15 +167,21 @@ private:
 
     void clearGpuBuffers();
 
+    // Get size of data type
+    size_t getTypeSize(nvinfer1::DataType type);
+
+    // caclulate total number of elements given Dims
+    size_t getTotalElements(const nvinfer1::Dims &dims);
+
     // Normalization, scaling, and mean subtraction of inputs
-    std::array<float, 3> m_subVals{};
-    std::array<float, 3> m_divVals{};
-    bool m_normalize;
+    // std::array<float, 3> m_subVals{};
+    // std::array<float, 3> m_divVals{};
+    // bool m_normalize;
 
     // Holds pointers to the input and output GPU buffers
     std::vector<void *> m_buffers;
-    std::vector<uint32_t> m_outputLengths{};
-    std::vector<nvinfer1::Dims3> m_inputDims;
+    std::vector<size_t> m_outputLengths{};
+    std::vector<nvinfer1::Dims> m_inputDims;
     std::vector<nvinfer1::Dims> m_outputDims;
     std::vector<std::string> m_IOTensorNames;
     int32_t m_inputBatchSize;
@@ -201,7 +190,7 @@ private:
     // https://forums.developer.nvidia.com/t/is-it-safe-to-deallocate-nvinfer1-iruntime-after-creating-an-nvinfer1-icudaengine-but-before-running-inference-with-said-icudaengine/255381/2?u=cyruspk4w6
     std::unique_ptr<nvinfer1::IRuntime> m_runtime = nullptr;
     std::unique_ptr<Int8EntropyCalibrator2> m_calibrator = nullptr;
-    std::unique_ptr<nvinfer1::ICudaEngine> m_engine = nullptr;
+    std::shared_ptr<nvinfer1::ICudaEngine> m_engine = nullptr;
     std::unique_ptr<nvinfer1::IExecutionContext> m_context = nullptr;
     const Options m_options;
     Logger m_logger;
@@ -222,9 +211,27 @@ template <typename T> void Engine<T>::clearGpuBuffers() {
     }
 }
 
+template <typename T> size_t Engine<T>::getTypeSize(nvinfer1::DataType type) {
+    switch (type) {
+    case nvinfer1::DataType::kFLOAT: return sizeof(float);
+    case nvinfer1::DataType::kHALF:  return sizeof(__half);
+    case nvinfer1::DataType::kINT8:  return sizeof(int8_t);
+    case nvinfer1::DataType::kINT32: return sizeof(int32_t);
+    case nvinfer1::DataType::kBOOL:  return sizeof(bool);
+    default: throw std::runtime_error("Unsupported data type");
+    }
+}
+
+template <typename T> size_t Engine<T>::getTotalElements(const nvinfer1::Dims &dims) {
+    size_t total = 1;
+    for (int i = 0; i < dims.nbDims; ++i) {
+        total *= dims.d[i];
+    }
+    return total;
+}
+
 template <typename T>
-bool Engine<T>::buildLoadNetwork(std::string onnxModelPath, const std::array<float, 3> &subVals, const std::array<float, 3> &divVals,
-                                 bool normalize) {
+bool Engine<T>::buildLoadNetwork(const std::string &onnxModelPath) {
     // Only regenerate the engine file if it has not already been generated for
     // the specified options, otherwise load cached version from disk
     const auto engineName = serializeEngineOptions(m_options, onnxModelPath);
@@ -241,23 +248,18 @@ bool Engine<T>::buildLoadNetwork(std::string onnxModelPath, const std::array<flo
         std::cout << "Engine not found, generating. This could take a while..." << std::endl;
 
         // Build the onnx model into a TensorRT engine
-        auto ret = build(onnxModelPath, subVals, divVals, normalize);
+        auto ret = build(onnxModelPath);
         if (!ret) {
             return false;
         }
     }
 
     // Load the TensorRT engine file into memory
-    return loadNetwork(engineName, subVals, divVals, normalize);
+    return loadNetwork(engineName);
 }
 
 template <typename T>
-bool Engine<T>::loadNetwork(std::string trtModelPath, const std::array<float, 3> &subVals, const std::array<float, 3> &divVals,
-                            bool normalize) {
-    m_subVals = subVals;
-    m_divVals = divVals;
-    m_normalize = normalize;
-
+bool Engine<T>::loadNetwork(const std::string &trtModelPath) {
     // Read the serialized model from disk
     if (!Util::doesFileExist(trtModelPath)) {
         std::cout << "Error, unable to read TensorRT model at path: " + trtModelPath << std::endl;
@@ -292,7 +294,7 @@ bool Engine<T>::loadNetwork(std::string trtModelPath, const std::array<float, 3>
     }
 
     // Create an engine, a representation of the optimized model.
-    m_engine = std::unique_ptr<nvinfer1::ICudaEngine>(m_runtime->deserializeCudaEngine(buffer.data(), buffer.size()));
+    m_engine = std::shared_ptr<nvinfer1::ICudaEngine>(m_runtime->deserializeCudaEngine(buffer.data(), buffer.size()));
     if (!m_engine) {
         return false;
     }
@@ -308,6 +310,7 @@ bool Engine<T>::loadNetwork(std::string trtModelPath, const std::array<float, 3>
     // This will be passed to TensorRT for inference
     clearGpuBuffers();
     m_buffers.resize(m_engine->getNbIOTensors());
+    std::cout << "Number of IO Tensors: " << m_engine->getNbIOTensors() << std::endl;
 
     m_outputLengths.clear();
     m_inputDims.clear();
@@ -327,58 +330,35 @@ bool Engine<T>::loadNetwork(std::string trtModelPath, const std::array<float, 3>
         const auto tensorShape = m_engine->getTensorShape(tensorName);
         const auto tensorDataType = m_engine->getTensorDataType(tensorName);
 
-        if (tensorType == nvinfer1::TensorIOMode::kINPUT) {
-            // The implementation currently only supports inputs of type float
-            if (m_engine->getTensorDataType(tensorName) != nvinfer1::DataType::kFLOAT) {
-                throw std::runtime_error("Error, the implementation currently only supports float inputs");
+        std::cout << "Binding " << i << " name: " << std::setw(30) << tensorName << ", type: " << (tensorType == nvinfer1::TensorIOMode::kINPUT ? "Input" : "Output")
+                  << ", dataType: " << static_cast<int>(tensorDataType) << ", shape: [";
+        for (int j = 0; j < tensorShape.nbDims; ++j) {
+            std::cout << tensorShape.d[j];
+            if (j < tensorShape.nbDims - 1) {
+                std::cout << ", ";
             }
+        }
+        std::cout << "]" << std::endl;
 
+        if (tensorType == nvinfer1::TensorIOMode::kINPUT) {
             // Don't need to allocate memory for inputs as we will be using the OpenCV
             // GpuMat buffer directly.
 
             // Store the input dims for later use
-            m_inputDims.emplace_back(tensorShape.d[1], tensorShape.d[2], tensorShape.d[3]);
-            m_inputBatchSize = tensorShape.d[0];
+            m_inputDims.emplace_back(tensorShape);
+            m_inputBatchSize = 1; //tensorShape.d[0];
         } else if (tensorType == nvinfer1::TensorIOMode::kOUTPUT) {
-            // Ensure the model output data type matches the template argument
-            // specified by the user
-            if (tensorDataType == nvinfer1::DataType::kFLOAT && !std::is_same<float, T>::value) {
-                throw std::runtime_error("Error, the model has expected output of type float. Engine class "
-                                         "template parameter must be adjusted.");
-            } else if (tensorDataType == nvinfer1::DataType::kHALF && !std::is_same<__half, T>::value) {
-                throw std::runtime_error("Error, the model has expected output of type __half. Engine class "
-                                         "template parameter must be adjusted.");
-            } else if (tensorDataType == nvinfer1::DataType::kINT8 && !std::is_same<int8_t, T>::value) {
-                throw std::runtime_error("Error, the model has expected output of type int8_t. Engine class "
-                                         "template parameter must be adjusted.");
-            } else if (tensorDataType == nvinfer1::DataType::kINT32 && !std::is_same<int32_t, T>::value) {
-                throw std::runtime_error("Error, the model has expected output of type int32_t. Engine "
-                                         "class template parameter must be adjusted.");
-            } else if (tensorDataType == nvinfer1::DataType::kBOOL && !std::is_same<bool, T>::value) {
-                throw std::runtime_error("Error, the model has expected output of type bool. Engine class "
-                                         "template parameter must be adjusted.");
-            } else if (tensorDataType == nvinfer1::DataType::kUINT8 && !std::is_same<uint8_t, T>::value) {
-                throw std::runtime_error("Error, the model has expected output of type uint8_t. Engine "
-                                         "class template parameter must be adjusted.");
-            } else if (tensorDataType == nvinfer1::DataType::kFP8) {
-                throw std::runtime_error("Error, model has unsupported output type");
-            }
-
             // The binding is an output
-            uint32_t outputLength = 1;
             m_outputDims.push_back(tensorShape);
 
-            for (int j = 1; j < tensorShape.nbDims; ++j) {
-                // We ignore j = 0 because that is the batch size, and we will take that
-                // into account when sizing the buffer
-                outputLength *= tensorShape.d[j];
-            }
-
-            m_outputLengths.push_back(outputLength);
             // Now size the output buffer appropriately, taking into account the max
             // possible batch size (although we could actually end up using less
             // memory)
-            Util::checkCudaErrorCode(cudaMallocAsync(&m_buffers[i], outputLength * m_options.maxBatchSize * sizeof(T), stream));
+            size_t outputLength = getTotalElements(tensorShape);
+            m_outputLengths.push_back(outputLength);
+
+            size_t typeSize = getTypeSize(tensorDataType);
+            Util::checkCudaErrorCode(cudaMallocAsync(&m_buffers[i], outputLength * m_options.maxBatchSize * typeSize, stream));
         } else {
             throw std::runtime_error("Error, IO Tensor is neither an input or output!");
         }
@@ -392,7 +372,7 @@ bool Engine<T>::loadNetwork(std::string trtModelPath, const std::array<float, 3>
 }
 
 template <typename T>
-bool Engine<T>::build(std::string onnxModelPath, const std::array<float, 3> &subVals, const std::array<float, 3> &divVals, bool normalize) {
+bool Engine<T>::build(const std::string &onnxModelPath) {
     // Create our engine builder.
     auto builder = std::unique_ptr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(m_logger));
     if (!builder) {
@@ -401,7 +381,7 @@ bool Engine<T>::build(std::string onnxModelPath, const std::array<float, 3> &sub
     }
 
     // Create the network definition object
-    auto networkFlags = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
+    auto networkFlags = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
     auto network = std::unique_ptr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(networkFlags));
     if (!network) {
         std::cout << "Failed to create TensorRT network." << std::endl;
@@ -441,6 +421,9 @@ bool Engine<T>::build(std::string onnxModelPath, const std::array<float, 3> &sub
     }
 
     config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, 1ULL << 30); // 1GB
+
+    // samplesCommon::enableDLA(builder.get(), config.get(), 0);
+
     // Set the precision level
     const auto engineName = serializeEngineOptions(m_options, onnxModelPath);
 
@@ -449,15 +432,12 @@ bool Engine<T>::build(std::string onnxModelPath, const std::array<float, 3> &sub
         if (!builder->platformHasFastFp16()) {
             throw std::runtime_error("Error: GPU does not support FP16 precision");
         }
-        // config->setFlag(nvinfer1::BuilderFlag::kFP16);
-        // config->setFlag(nvinfer1::BuilderFlag::kPREFER_PRECISION_CONSTRAINTS);
+        config->setFlag(nvinfer1::BuilderFlag::kFP16);
+        config->setFlag(nvinfer1::BuilderFlag::kPREFER_PRECISION_CONSTRAINTS);
     }
 
-    // Register a single optimization profile
-    nvinfer1::IOptimizationProfile *optProfile = builder->createOptimizationProfile();
-
     const auto numInputs = network->getNbInputs();
-    bool doesSupportDynamicBatch = false;
+    std::cout << "Number of model inputs: " << numInputs << std::endl;
     for (int32_t i = 0; i < numInputs; ++i) {
         // Must specify dimensions for all the inputs the model expects.
         const auto input = network->getInput(i);
@@ -465,33 +445,49 @@ bool Engine<T>::build(std::string onnxModelPath, const std::array<float, 3> &sub
         const auto inputDims = input->getDimensions();
         std::cout << "Input " << i << " name: " << inputName << std::endl;
         std::cout << "Input " << i << " dimensions: " << inputDims.nbDims << std::endl;
+        std::cout << "Input " << i << " shape: [";
+        for (int32_t d = 0; d < inputDims.nbDims; ++d) std::cout << inputDims.d[d] << ", ";
+        std::cout << "]" << std::endl;
+    }
 
-        int32_t inputH = inputDims.d[1];
-        int32_t inputW = inputDims.d[2];
-        int32_t inputC = inputDims.d[3];
-
-        std::cout << "Input " << i << " shape: (" << inputH << ", " << inputW << ", " << inputC << ")" << std::endl;
+    if (onnxModelPath.find("memory_attention") != std::string::npos) { // memory_attention model的输入是动态尺寸
+        // Register a single optimization profile
+        nvinfer1::IOptimizationProfile *optProfile = builder->createOptimizationProfile();
 
         // Specify the optimization profile`
-        if (doesSupportDynamicBatch) {
-            optProfile->setDimensions(inputName, nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(1, inputC, inputH, inputW));
-        } else {
-            optProfile->setDimensions(inputName, nvinfer1::OptProfileSelector::kMIN,
-                                      nvinfer1::Dims4(m_options.optBatchSize, inputH, inputW, inputC));
-        }
-        optProfile->setDimensions(inputName, nvinfer1::OptProfileSelector::kOPT,
-                                  nvinfer1::Dims4(m_options.optBatchSize, inputH, inputW, inputC));
-        optProfile->setDimensions(inputName, nvinfer1::OptProfileSelector::kMAX,
-                                  nvinfer1::Dims4(m_options.maxBatchSize, inputH, inputW, inputC));
+        nvinfer1::Dims maskmemDims = network->getInput(2)->getDimensions(); // maskmem_feats shepe [1024, -1, 1, 64] 
+        optProfile->setDimensions("maskmem_feats", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(maskmemDims.d[0], 1, maskmemDims.d[2], maskmemDims.d[3]));
+        optProfile->setDimensions("maskmem_feats", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(maskmemDims.d[0], 7, maskmemDims.d[2], maskmemDims.d[3]));
+        optProfile->setDimensions("maskmem_feats", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(maskmemDims.d[0], 7, maskmemDims.d[2], maskmemDims.d[3]));
+
+        nvinfer1::Dims memPosEmbedDims = network->getInput(3)->getDimensions(); // memory_pos_embed shape [1024, -1, 1, 64]
+        optProfile->setDimensions("memory_pos_embed", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(memPosEmbedDims.d[0], 1, memPosEmbedDims.d[2], memPosEmbedDims.d[3]));
+        optProfile->setDimensions("memory_pos_embed", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(memPosEmbedDims.d[0], 7, memPosEmbedDims.d[2], memPosEmbedDims.d[3]));
+        optProfile->setDimensions("memory_pos_embed", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(memPosEmbedDims.d[0], 7, memPosEmbedDims.d[2], memPosEmbedDims.d[3]));
+
+        nvinfer1::Dims objPtrDims = network->getInput(4)->getDimensions(); // obj_ptrs shape [-1, 1, 256]
+        optProfile->setDimensions("obj_ptrs", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims3(1,  objPtrDims.d[1], objPtrDims.d[2]));
+        optProfile->setDimensions("obj_ptrs", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims3(16, objPtrDims.d[1], objPtrDims.d[2]));
+        optProfile->setDimensions("obj_ptrs", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims3(16, objPtrDims.d[1], objPtrDims.d[2]));
+
+        nvinfer1::Dims objPosDims = network->getInput(5)->getDimensions(); // obj_pos shape [-1]
+        optProfile->setDimensions("obj_pos", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims{1, {1}});
+        optProfile->setDimensions("obj_pos", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims{1, {16}});
+        optProfile->setDimensions("obj_pos", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims{1, {16}});
+
+        config->addOptimizationProfile(optProfile);
     }
-    // config->addOptimizationProfile(optProfile);
-
-
 
     // CUDA stream used for profiling by the builder.
-    // cudaStream_t profileStream;
-    // Util::checkCudaErrorCode(cudaStreamCreate(&profileStream));
-    // config->setProfileStream(profileStream);
+    cudaStream_t profileStream;
+    Util::checkCudaErrorCode(cudaStreamCreate(&profileStream));
+    config->setProfileStream(profileStream);
+    // auto profileStream = samplesCommon::makeCudaStream();
+    // if (!profileStream)
+    // {
+    //     return false;
+    // }
+    // config->setProfileStream(*profileStream);
 
     // Build the engine
     // If this call fails, it is suggested to increase the logger verbosity to
@@ -508,7 +504,7 @@ bool Engine<T>::build(std::string onnxModelPath, const std::array<float, 3> &sub
 
     std::cout << "Success, saved engine to " << engineName << std::endl;
 
-    // Util::checkCudaErrorCode(cudaStreamDestroy(profileStream));
+    Util::checkCudaErrorCode(cudaStreamDestroy(profileStream));
     return true;
 }
 
@@ -523,75 +519,23 @@ bool Engine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &i
     }
 
     const auto numInputs = m_inputDims.size();
-    if (inputs.size() != numInputs) {
-        std::cout << "===== Error =====" << std::endl;
-        std::cout << "Incorrect number of inputs provided!" << std::endl;
-        return false;
-    }
-
-    // Ensure the batch size does not exceed the max
-    if (inputs[0].size() > static_cast<size_t>(m_options.maxBatchSize)) {
-        std::cout << "===== Error =====" << std::endl;
-        std::cout << "The batch size is larger than the model expects!" << std::endl;
-        std::cout << "Model max batch size: " << m_options.maxBatchSize << std::endl;
-        std::cout << "Batch size provided to call to runInference: " << inputs[0].size() << std::endl;
-        return false;
-    }
-
-    // Ensure that if the model has a fixed batch size that is greater than 1, the
-    // input has the correct length
-    if (m_inputBatchSize != -1 && inputs[0].size() != static_cast<size_t>(m_inputBatchSize)) {
-        std::cout << "===== Error =====" << std::endl;
-        std::cout << "The batch size is different from what the model expects!" << std::endl;
-        std::cout << "Model batch size: " << m_inputBatchSize << std::endl;
-        std::cout << "Batch size provided to call to runInference: " << inputs[0].size() << std::endl;
-        return false;
-    }
 
     const auto batchSize = static_cast<int32_t>(inputs[0].size());
-    // Make sure the same batch size was provided for all inputs
-    for (size_t i = 1; i < inputs.size(); ++i) {
-        if (inputs[i].size() != static_cast<size_t>(batchSize)) {
-            std::cout << "===== Error =====" << std::endl;
-            std::cout << "The batch size needs to be constant for all inputs!" << std::endl;
-            return false;
-        }
-    }
 
     // Create the cuda stream that will be used for inference
     cudaStream_t inferenceCudaStream;
     Util::checkCudaErrorCode(cudaStreamCreate(&inferenceCudaStream));
-
-    std::vector<cv::cuda::GpuMat> preprocessedInputs;
 
     // Preprocess all the inputs
     for (size_t i = 0; i < numInputs; ++i) {
         const auto &batchInput = inputs[i];
         const auto &dims = m_inputDims[i];
 
-        auto &input = batchInput[0];
-        if (input.channels() != dims.d[2] || input.rows != dims.d[0] || input.cols != dims.d[1]) {
-            std::cout << "===== Error =====" << std::endl;
-            std::cout << "Input does not have correct size!" << std::endl;
-            std::cout << "Expected: (" << dims.d[0] << ", " << dims.d[1] << ", " << dims.d[2] << ")" << std::endl;
-            std::cout << "Got: (" << input.channels() << ", " << input.rows << ", " << input.cols << ")" << std::endl;
-            std::cout << "Ensure you resize your input image to the correct size" << std::endl;
-            return false;
-        }
+        auto input = batchInput[0];
 
-        nvinfer1::Dims4 inputDims = {batchSize, dims.d[0], dims.d[1], dims.d[2]};
-        m_context->setInputShape(m_IOTensorNames[i].c_str(),
-                                 inputDims); // Define the batch size
+        m_context->setInputShape(m_IOTensorNames[i].c_str(), dims);
 
-        // OpenCV reads images into memory in NHWC format, while TensorRT expects
-        // images in NCHW format. The following method converts NHWC to NCHW. Even
-        // though TensorRT expects NCHW at IO, during optimization, it can
-        // internally use NHWC to optimize cuda kernels See:
-        // https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#data-layout
-        // Copy over the input data and perform the preprocessing
-        auto mfloat = blobFromGpuMats(batchInput, m_subVals, m_divVals, m_normalize);
-        preprocessedInputs.push_back(mfloat);
-        m_buffers[i] = mfloat.ptr<void>();
+        m_buffers[i] = input.ptr<void>();
     }
 
     // Ensure all dynamic bindings have been defined.
@@ -606,6 +550,12 @@ bool Engine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &i
             return false;
         }
     }
+
+    // for (int32_t i = 0, e = m_engine->getNbIOTensors(); i < e; i++)
+    // {
+    //     auto const name = m_engine->getIOTensorName(i);
+    //     m_context->setTensorAddress(name, buffers.getDeviceBuffer(name));
+    // }
 
     // Run inference.
     bool status = m_context->enqueueV3(inferenceCudaStream);

@@ -5,24 +5,34 @@ SAM2Tracker::SAM2Tracker(const std::string &onnxModelPath, const std::string &tr
 
     // Create our TensorRT inference engine
     Options options{Precision::FP16, "", 128, 1, 1, 0};
-    m_trtEngine = std::make_unique<Engine<float>>(options);
+
+    std::vector<std::string> onnx_models {"image_encoder.onnx", "memory_attention.onnx", "memory_encoder.onnx", "mask_decoder.onnx"};
+    std::vector<std::string> trt_models {"image_encoder.engine", "memory_attention.engine", "memory_encoder.engine", "mask_decoder.engine"};
 
     // Build the onnx model into a TensorRT engine file, cache the file to disk, and then load the TensorRT engine file into memory.
     // If the engine file already exists on disk, this function will not rebuild but only load into memory.
     // The engine file is rebuilt any time the above Options are changed.
     if (!onnxModelPath.empty()) {
         // Build the ONNX model into a TensorRT engine file
-        auto succ = m_trtEngine->buildLoadNetwork(onnxModelPath + "/image_encoder.onnx");
-        if (!succ) {
-            const std::string errMsg = "Error: Unable to build or load the TensorRT engine from ONNX model. "
-                                       "Try increasing TensorRT log severity to kVERBOSE (in /libs/tensorrt-cpp-api/engine.cpp).";
-            throw std::runtime_error(errMsg);
+        for (const auto& model_name : onnx_models) {
+            std::unique_ptr<Engine<float>> trtEngine = std::make_unique<Engine<float>>(options);
+            auto succ = trtEngine->buildLoadNetwork(onnxModelPath + "/" + model_name);
+            if (!succ) {
+                const std::string errMsg = "Error: Unable to build or load the TensorRT engine from ONNX model : " + model_name;
+                throw std::runtime_error(errMsg);
+            }
+            m_trtEngines.push_back(std::move(trtEngine));
         }
     } else if (!trtModelPath.empty()) { // If no ONNX model, check for TRT model
         // Load the TensorRT engine file directly
-        bool succ = m_trtEngine->loadNetwork(trtModelPath);
-        if (!succ) {
-            throw std::runtime_error("Error: Unable to load TensorRT engine from " + trtModelPath);
+        for (const auto& model_name : trt_models) {
+            std::unique_ptr<Engine<float>> trtEngine = std::make_unique<Engine<float>>(options);
+            auto succ = trtEngine->loadNetwork(trtModelPath + "/" + model_name);
+            if (!succ) {
+                const std::string errMsg = "Error: Unable to load the TensorRT engine from file : " + model_name;
+                throw std::runtime_error(errMsg);
+            }
+            m_trtEngines.push_back(std::move(trtEngine));
         }
     } else {
         throw std::runtime_error("Error: Neither ONNX model nor TensorRT engine path provided.");
@@ -216,23 +226,11 @@ void SAM2Tracker::printDataType(ONNXTensorElementDataType type) {
 void SAM2Tracker::imageEncoderInference(const cv::Mat& frame, std::vector<Ort::Value>& imageEncoderOutputTensors) {
     auto start = std::chrono::high_resolution_clock::now();
 
-    // auto memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    // Ort::Value inputImageTensor = Ort::Value::CreateTensor<float>(memoryInfo, frame.data(), frame.size(),
-    //                                                         _imageEncoderInputNodeDims[0].data(), _imageEncoderInputNodeDims[0].size());
-    // std::vector<Ort::Value> inputTensors;
-    // inputTensors.push_back(std::move(inputImageTensor));
-    // imageEncoderOutputTensors = _imageEncoderSession->Run(Ort::RunOptions{nullptr},
-    //                                                                 _imageEncoderInputNodeNames.data(),
-    //                                                                 inputTensors.data(),
-    //                                                                 inputTensors.size(),
-    //                                                                 _imageEncoderOutputNodeNames.data(),
-    //                                                                 _imageEncoderOutputNodeNames.size());
-    
     // Upload the image to GPU memory
     cv::cuda::GpuMat gpuImg;
     gpuImg.upload(frame);
     // Populate the input vectors
-    const auto &inputDims = m_trtEngine->getInputDims();
+    const auto &inputDims = m_trtEngines[0]->getInputDims();
 
     std::cout << "inputDims size " << inputDims.size() << std::endl;
     std::cout << "inputDims[0] " << inputDims[0].nbDims << std::endl;
@@ -243,6 +241,8 @@ void SAM2Tracker::imageEncoderInference(const cv::Mat& frame, std::vector<Ort::V
     // Convert the image from BGR to RGB
     cv::cuda::GpuMat rgbMat;
     cv::cuda::cvtColor(gpuImg, rgbMat, cv::COLOR_BGR2RGB);
+    cv::cuda::resize(rgbMat, rgbMat, cv::Size(inputDims[0].d[1], inputDims[0].d[2]));
+    rgbMat.convertTo(rgbMat, CV_32FC3, 1.0 / 255.0);
 
     auto resized = rgbMat; // 为什么不直接用 rgbMat 呢？ans: 下面会判断是否需要resize
 
@@ -252,19 +252,27 @@ void SAM2Tracker::imageEncoderInference(const cv::Mat& frame, std::vector<Ort::V
     std::vector<cv::cuda::GpuMat> input{std::move(resized)};
     std::vector<std::vector<cv::cuda::GpuMat>> inputs{std::move(input)};
 
-    // These params will be used in the post-processing stage
-    // m_imgHeight = rgbMat.rows;
-    // m_imgWidth = rgbMat.cols;
-    // m_ratio = 1.f / std::min(inputDims[0].d[2] / static_cast<float>(rgbMat.cols), inputDims[0].d[1] / static_cast<float>(rgbMat.rows));
-
-
     std::vector<std::vector<std::vector<float>>> featureVectors;
 
-    bool succ = m_trtEngine->runInference(inputs, featureVectors);
+    bool succ = m_trtEngines[0]->runInference(inputs, featureVectors);
     if (!succ) {
         throw std::runtime_error("Unable to run inference.");
     }
-    
+
+    // featureVectors.size(); // batch size
+    // featureVectors[0].size(); // number of outputs
+    // featureVectors[0][0].size(); // size of output 0
+    std::cout << "featureVectors size: " << featureVectors.size() << std::endl;
+    for (size_t i = 0; i < featureVectors[0].size(); i++) {
+        std::cout << "featureVectors[0][" << i << "] size: " << featureVectors[0][i].size() << std::endl;
+        float sum = std::accumulate(featureVectors[0][i].begin(), featureVectors[0][i].end(), 0.0f);
+        std::cout << "  sum: " << sum << ", first 10 elements: ";
+        for (size_t j = 0; j < std::min(featureVectors[0][i].size(), static_cast<size_t>(10)); j++) {
+            std::cout << featureVectors[0][i][j] << ", ";
+        }
+        std::cout << std::endl;
+    }
+    exit(0);
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
     std::cout << "image_encoder spent: " << duration.count() * 1000 << " ms" << std::endl;
 }
@@ -496,7 +504,7 @@ cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, 
     
     cv::Mat resizedFrame = firstFrame.clone();
     cv::resize(firstFrame, resizedFrame, cv::Size(512, 512));
-    for (int i = 0; i < 100; i++)     imageEncoderInference(resizedFrame, imageEncoderOutputTensors);
+    for (int i = 0; i < 5; i++)     imageEncoderInference(resizedFrame, imageEncoderOutputTensors);
 
     // 2) mask_decoder 推理
     std::vector<float> inputPoints = {static_cast<float>(bbox.x), static_cast<float>(bbox.y), 
@@ -710,8 +718,8 @@ void SAM2Tracker::preprocessImage(const cv::Mat& src, std::vector<float>& dest) 
     rgbImage.convertTo(rgbImage, CV_32FC3); // 转换为float
     dest.assign((float*)rgbImage.data, (float*)rgbImage.data + rgbImage.total() * rgbImage.channels());
 
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "preprocessImage spent: " << duration.count() << " ms" << std::endl;
+    auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
+    std::cout << "preprocessImage spent: " << duration.count() * 1000 << " ms" << std::endl;
 }
 
 PostprocessResult SAM2Tracker::postprocessOutput(std::vector<Ort::Value>& maskDecoderOutputTensors) {
@@ -870,8 +878,8 @@ PostprocessResult SAM2Tracker::postprocessOutput(std::vector<Ort::Value>& maskDe
     
 #endif
 
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "postprocess spent: " << duration.count() << " ms" << std::endl;
+    auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
+    std::cout << "postprocess spent: " << duration.count() * 1000 << " ms" << std::endl;
 
     return {bestIoUIndex, bestIouScore, kfScore};
 }

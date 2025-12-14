@@ -91,7 +91,7 @@ private:
     Ort::SessionOptions _sessionOptions{nullptr};
 
     // TensorRT Engine
-    std::unique_ptr<Engine<float>> m_trtEngine = nullptr;
+    std::vector<std::unique_ptr<Engine<float>>> m_trtEngines;
 
     std::unique_ptr<Ort::Session> _imageEncoderSession{nullptr};
     std::unique_ptr<Ort::Session> _memoryAttentionSession{nullptr};
