@@ -56,6 +56,7 @@ public:
 
     cv::Mat trackStep(int frameIdx, const cv::Mat &frame);
 
+    void imageEncoderInference(const std::vector<float> &frame, std::vector<std::vector<float>> &imageEncoderOutputTensors);
     void imageEncoderInference(const cv::cuda::GpuMat &frame, std::vector<std::vector<float>> &imageEncoderOutputTensors);
 
     void memoryAttentionInference(int frameIdx, 
@@ -74,6 +75,7 @@ public:
                                 bool isMaskFromPts,
                                 std::vector<Ort::Value> &memoryEncoderOutputTensors);
 
+    void preprocessImage(const cv::Mat &src, std::vector<float> &dest);
     void preprocessImage(const cv::Mat &inputImageBGR, cv::cuda::GpuMat &dest);
 
     PostprocessResult postprocessOutput(std::vector<Ort::Value> &maskDecoderOutputTensors);

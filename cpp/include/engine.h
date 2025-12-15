@@ -11,6 +11,7 @@
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/cudawarping.hpp>
 #include <opencv2/opencv.hpp>
+#include <numeric>
 
 // Utility methods
 namespace Util {
@@ -131,6 +132,11 @@ public:
     // Output format [batch][output][feature_vector]
     bool runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inputs, std::vector<std::vector<T>> &featureVectors);
 
+    // Run inference.
+    // Input format [input][float]
+    // Output format [output][feature_vector]
+    bool runInference(const std::vector<std::vector<float>> &inputs, std::vector<std::vector<float>> &featureVectors);
+
     // Utility method for resizing an image while maintaining the aspect ratio by
     // adding padding to smaller dimension after scaling While letterbox padding
     // normally adds padding to top & bottom, or left & right sides, this
@@ -223,11 +229,13 @@ template <typename T> size_t Engine<T>::getTypeSize(nvinfer1::DataType type) {
 }
 
 template <typename T> size_t Engine<T>::getTotalElements(const nvinfer1::Dims &dims) {
-    size_t total = 1;
-    for (int i = 0; i < dims.nbDims; ++i) {
-        total *= dims.d[i];
-    }
-    return total;
+    // size_t total = 1;
+    // for (int i = 0; i < dims.nbDims; ++i) {
+    //     total *= dims.d[i];
+    // }
+    // return total;
+
+    return std::accumulate(dims.d, dims.d + dims.nbDims, static_cast<size_t>(1), std::multiplies<int>());
 }
 
 template <typename T>
@@ -586,6 +594,118 @@ bool Engine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &i
     Util::checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
     return true;
 }
+
+template <typename T>
+bool Engine<T>::runInference(const std::vector<std::vector<float>> &inputs,
+                             std::vector<std::vector<float>> &featureVectors) {
+    
+    // First we do some error checking
+    if (inputs.empty() || inputs[0].empty()) {
+        std::cout << "===== Error =====" << std::endl;
+        std::cout << "Provided input vector is empty!" << std::endl;
+        return false;
+    }
+
+    const auto numInputs = m_inputDims.size();
+
+    // Create the cuda stream that will be used for inference
+    cudaStream_t inferenceCudaStream;
+    Util::checkCudaErrorCode(cudaStreamCreate(&inferenceCudaStream));
+    
+    // 1. 准备GPU内存用于输入数据
+    std::vector<void*> inputDevicePtrs(numInputs, nullptr);
+    
+    // 为每个输入分配GPU内存并复制数据
+    for (size_t i = 0; i < numInputs; ++i) {
+        const auto &input = inputs[i];
+        const auto &dims = m_inputDims[i];
+        
+        // 计算每个输入的体积（元素总数）
+        size_t volume = getTotalElements(dims);
+        
+        // 分配GPU内存
+        Util::checkCudaErrorCode(cudaMalloc(&inputDevicePtrs[i], volume * sizeof(float)));
+        
+        // 复制数据到GPU
+        Util::checkCudaErrorCode(cudaMemcpyAsync(
+            static_cast<char*>(inputDevicePtrs[i]) + volume * sizeof(float),
+            input.data(),
+            volume * sizeof(float),
+            cudaMemcpyHostToDevice,
+            inferenceCudaStream
+        ));
+        
+        // 设置TensorRT输入形状
+        m_context->setInputShape(m_IOTensorNames[i].c_str(), dims);
+        
+        // 设置输入缓冲区指针
+        m_buffers[i] = inputDevicePtrs[i];
+    }
+    
+    // 确保所有动态绑定都已定义
+    if (!m_context->allInputDimensionsSpecified()) {
+        throw std::runtime_error("Error, not all required dimensions specified.");
+    }
+
+    // 设置输入和输出缓冲区的地址
+    for (size_t i = 0; i < m_buffers.size(); ++i) {
+        bool status = m_context->setTensorAddress(m_IOTensorNames[i].c_str(), m_buffers[i]);
+        if (!status) {
+            // 清理GPU内存
+            for (auto& ptr : inputDevicePtrs) {
+                if (ptr) cudaFree(ptr);
+            }
+            cudaStreamDestroy(inferenceCudaStream);
+            return false;
+        }
+    }
+
+    // 运行推理
+    bool status = m_context->enqueueV3(inferenceCudaStream);
+    if (!status) {
+        // 清理GPU内存
+        for (auto& ptr : inputDevicePtrs) {
+            if (ptr) cudaFree(ptr);
+        }
+        cudaStreamDestroy(inferenceCudaStream);
+        return false;
+    }
+
+    // 将输出复制回CPU
+    for (int32_t outputBinding = numInputs; outputBinding < m_engine->getNbIOTensors(); ++outputBinding) {
+        std::vector<float> output;
+        auto outputLength = m_outputLengths[outputBinding - numInputs];
+        output.resize(outputLength);
+        
+        // 分配CPU内存用于输出
+        float* hostOutput = output.data();
+        
+        // 从GPU复制输出数据
+        Util::checkCudaErrorCode(cudaMemcpyAsync(
+            hostOutput,
+            static_cast<char *>(m_buffers[outputBinding]) + (sizeof(float) * outputLength),
+            outputLength * sizeof(float),
+            cudaMemcpyDeviceToHost,
+            inferenceCudaStream
+        ));
+        
+        featureVectors.emplace_back(std::move(output));
+    }
+
+    // 同步CUDA流
+    Util::checkCudaErrorCode(cudaStreamSynchronize(inferenceCudaStream));
+    
+    // 清理GPU内存
+    for (auto& ptr : inputDevicePtrs) {
+        if (ptr) {
+            Util::checkCudaErrorCode(cudaFree(ptr));
+        }
+    }
+    
+    Util::checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
+    return true;
+}
+
 
 template <typename T>
 cv::cuda::GpuMat Engine<T>::blobFromGpuMats(const std::vector<cv::cuda::GpuMat> &batchInput, const std::array<float, 3> &subVals,
