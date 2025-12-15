@@ -50,40 +50,40 @@ public:
     SAM2Tracker(const std::string &onnxModelPath, const std::string &trtModelPath, const SAM2Config &config);
     ~SAM2Tracker() {}
 
-    void loadNetwork(const std::string& modelPath, bool useGPU, bool enableFp16);
+    void loadNetwork(const std::string &modelPath, bool useGPU, bool enableFp16);
 
-    cv::Mat addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, const cv::Rect& bbox);
+    cv::Mat addFirstFrameBbox(int frameIdx, const cv::Mat &firstFrame, const cv::Rect &bbox);
 
-    cv::Mat trackStep(int frameIdx, const cv::Mat& frame);
+    cv::Mat trackStep(int frameIdx, const cv::Mat &frame);
 
-    void imageEncoderInference(const cv::Mat& frame, std::vector<Ort::Value>& imageEncoderOutputTensors);
+    void imageEncoderInference(const cv::cuda::GpuMat &frame, std::vector<std::vector<float>> &imageEncoderOutputTensors);
 
     void memoryAttentionInference(int frameIdx, 
-                                  std::vector<Ort::Value>& imageEncoderOutputTensors,
-                                  std::vector<Ort::Value>& memoryAttentionOutputTensors);
+                                  std::vector<Ort::Value> &imageEncoderOutputTensors,
+                                  std::vector<Ort::Value> &memoryAttentionOutputTensors);
 
-    void maskDecoderInference(std::vector<float>& inputPoints,
-                              std::vector<int32_t>& inputLabels,
-                              std::vector<Ort::Value>& imageEncoderOutputTensors,
-                              Ort::Value& pixFeatWithMem,
-                              std::vector<Ort::Value>& maskDecoderOutputTensors);
+    void maskDecoderInference(std::vector<float> &inputPoints,
+                              std::vector<int32_t> &inputLabels,
+                              std::vector<Ort::Value> &imageEncoderOutputTensors,
+                              Ort::Value &pixFeatWithMem,
+                              std::vector<Ort::Value> &maskDecoderOutputTensors);
 
-    void memoryEncoderInference(Ort::Value& visionFeaturesTensor,
-                                Ort::Value& highResMasksForMemTensor,
-                                Ort::Value& objectScoreLogitsTensor,
+    void memoryEncoderInference(Ort::Value &visionFeaturesTensor,
+                                Ort::Value &highResMasksForMemTensor,
+                                Ort::Value &objectScoreLogitsTensor,
                                 bool isMaskFromPts,
-                                std::vector<Ort::Value>& memoryEncoderOutputTensors);
+                                std::vector<Ort::Value> &memoryEncoderOutputTensors);
 
-    void preprocessImage(const cv::Mat& src, std::vector<float>& dest);
+    void preprocessImage(const cv::Mat &inputImageBGR, cv::cuda::GpuMat &dest);
 
-    PostprocessResult postprocessOutput(std::vector<Ort::Value>& maskDecoderOutputTensors);
+    PostprocessResult postprocessOutput(std::vector<Ort::Value> &maskDecoderOutputTensors);
 
 private:
-    void getModelInfo(const Ort::Session* session, const std::string& modelName,
-                        std::vector<const char*>& inputNodeNames,
-                        std::vector<const char*>& outputNodeNames,
-                        std::vector<std::vector<int64_t>>& inputNodeDims,
-                        std::vector<std::vector<int64_t>>& outputNodeDims);
+    void getModelInfo(const Ort::Session* session, const std::string &modelName,
+                        std::vector<const char*> &inputNodeNames,
+                        std::vector<const char*> &outputNodeNames,
+                        std::vector<std::vector<int64_t>> &inputNodeDims,
+                        std::vector<std::vector<int64_t>> &outputNodeDims);
     void printDataType(ONNXTensorElementDataType type);
 
     // // ONNXRuntime related

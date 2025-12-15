@@ -31,8 +31,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
                             # ${CUDA_INCLUDE_DIRS}
                             )
 
-target_link_directories(${PROJECT_NAME} PRIVATE
-                        /home/user/3rd-party/tensorRT/TensorRT-10.2.0.19.Linux.x86_64-gnu.cuda-12.5/TensorRT-10.2.0.19/lib)
+# target_link_directories(${PROJECT_NAME} PRIVATE
+#                         /home/user/3rd-party/tensorRT/TensorRT-10.2.0.19.Linux.x86_64-gnu.cuda-12.5/TensorRT-10.2.0.19/lib)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
                         ${OpenCV_LIBS}

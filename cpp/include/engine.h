@@ -129,7 +129,7 @@ public:
     // Run inference.
     // Input format [input][batch][cv::cuda::GpuMat]
     // Output format [batch][output][feature_vector]
-    bool runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inputs, std::vector<std::vector<std::vector<T>>> &featureVectors);
+    bool runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inputs, std::vector<std::vector<T>> &featureVectors);
 
     // Utility method for resizing an image while maintaining the aspect ratio by
     // adding padding to smaller dimension after scaling While letterbox padding
@@ -280,6 +280,7 @@ bool Engine<T>::loadNetwork(const std::string &trtModelPath) {
     // Create a runtime to deserialize the engine file.
     m_runtime = std::unique_ptr<nvinfer1::IRuntime>{nvinfer1::createInferRuntime(m_logger)};
     if (!m_runtime) {
+        std::cout << "Error, unable to create TensorRT runtime." << std::endl;
         return false;
     }
 
@@ -296,6 +297,7 @@ bool Engine<T>::loadNetwork(const std::string &trtModelPath) {
     // Create an engine, a representation of the optimized model.
     m_engine = std::shared_ptr<nvinfer1::ICudaEngine>(m_runtime->deserializeCudaEngine(buffer.data(), buffer.size()));
     if (!m_engine) {
+        std::cout << "Error, unable to create TensorRT engine." << std::endl;
         return false;
     }
 
@@ -330,7 +332,7 @@ bool Engine<T>::loadNetwork(const std::string &trtModelPath) {
         const auto tensorShape = m_engine->getTensorShape(tensorName);
         const auto tensorDataType = m_engine->getTensorDataType(tensorName);
 
-        std::cout << "Binding " << i << " name: " << std::setw(30) << tensorName << ", type: " << (tensorType == nvinfer1::TensorIOMode::kINPUT ? "Input" : "Output")
+        std::cout << "Binding " << i << " name: " << std::setw(20) << tensorName << ", type: " << (tensorType == nvinfer1::TensorIOMode::kINPUT ? "Input" : "Output")
                   << ", dataType: " << static_cast<int>(tensorDataType) << ", shape: [";
         for (int j = 0; j < tensorShape.nbDims; ++j) {
             std::cout << tensorShape.d[j];
@@ -510,7 +512,7 @@ bool Engine<T>::build(const std::string &onnxModelPath) {
 
 template <typename T>
 bool Engine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inputs,
-                             std::vector<std::vector<std::vector<T>>> &featureVectors) {
+                             std::vector<std::vector<T>> &featureVectors) {
     // First we do some error checking
     if (inputs.empty() || inputs[0].empty()) {
         std::cout << "===== Error =====" << std::endl;
@@ -564,11 +566,7 @@ bool Engine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &i
     }
 
     // Copy the outputs back to CPU
-    featureVectors.clear();
-
     for (int batch = 0; batch < batchSize; ++batch) {
-        // Batch
-        std::vector<std::vector<T>> batchOutputs{};
         for (int32_t outputBinding = numInputs; outputBinding < m_engine->getNbIOTensors(); ++outputBinding) {
             // We start at index m_inputDims.size() to account for the inputs in our
             // m_buffers
@@ -579,9 +577,8 @@ bool Engine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &i
             Util::checkCudaErrorCode(cudaMemcpyAsync(output.data(),
                                                      static_cast<char *>(m_buffers[outputBinding]) + (batch * sizeof(T) * outputLength),
                                                      outputLength * sizeof(T), cudaMemcpyDeviceToHost, inferenceCudaStream));
-            batchOutputs.emplace_back(std::move(output));
+            featureVectors.emplace_back(std::move(output));
         }
-        featureVectors.emplace_back(std::move(batchOutputs));
     }
 
     // Synchronize the cuda stream

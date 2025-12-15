@@ -1,7 +1,7 @@
 #include "sam2_tracker.h"
+#include <numeric>
 
 SAM2Tracker::SAM2Tracker(const std::string &onnxModelPath, const std::string &trtModelPath, const SAM2Config &config) {
-    // loadNetwork(modelPath, useGPU, enableFp16);
 
     // Create our TensorRT inference engine
     Options options{Precision::FP16, "", 128, 1, 1, 0};
@@ -39,7 +39,7 @@ SAM2Tracker::SAM2Tracker(const std::string &onnxModelPath, const std::string &tr
     }
 }
 
-void SAM2Tracker::loadNetwork(const std::string& modelPath, bool useGPU, bool enableFp16) {
+void SAM2Tracker::loadNetwork(const std::string &modelPath, bool useGPU, bool enableFp16) {
     // 1) init ONNX Runtime SessionOptions
     _sessionOptions = Ort::SessionOptions();
     // std::cout << "ONNX Runtime version: " << Ort::GetVersionString() << std::endl;
@@ -130,11 +130,11 @@ void SAM2Tracker::loadNetwork(const std::string& modelPath, bool useGPU, bool en
     }
 }
 
-void SAM2Tracker::getModelInfo(const Ort::Session* session, const std::string& modelName,
-                                std::vector<const char*>& inputNodeNames,
-                                std::vector<const char*>& outputNodeNames,
-                                std::vector<std::vector<int64_t>>& inputNodeDims,
-                                std::vector<std::vector<int64_t>>& outputNodeDims) {
+void SAM2Tracker::getModelInfo(const Ort::Session* session, const std::string &modelName,
+                                std::vector<const char*> &inputNodeNames,
+                                std::vector<const char*> &outputNodeNames,
+                                std::vector<std::vector<int64_t>> &inputNodeDims,
+                                std::vector<std::vector<int64_t>> &outputNodeDims) {
     Ort::AllocatorWithDefaultOptions allocator;
 
     size_t numInputNodes = session->GetInputCount();
@@ -223,38 +223,16 @@ void SAM2Tracker::printDataType(ONNXTensorElementDataType type) {
     }
 }
 
-void SAM2Tracker::imageEncoderInference(const cv::Mat& frame, std::vector<Ort::Value>& imageEncoderOutputTensors) {
+void SAM2Tracker::imageEncoderInference(const cv::cuda::GpuMat &frame, std::vector<std::vector<float>> &imageEncoderOutputTensors) {
     auto start = std::chrono::high_resolution_clock::now();
-
-    // Upload the image to GPU memory
-    cv::cuda::GpuMat gpuImg;
-    gpuImg.upload(frame);
-    // Populate the input vectors
-    const auto &inputDims = m_trtEngines[0]->getInputDims();
-
-    std::cout << "inputDims size " << inputDims.size() << std::endl;
-    std::cout << "inputDims[0] " << inputDims[0].nbDims << std::endl;
-    for (int i = 0; i < inputDims[0].nbDims; i++) {
-        std::cout << "inputDims[0].d[" << i << "] " << inputDims[0].d[i] << std::endl;
-    }
-
-    // Convert the image from BGR to RGB
-    cv::cuda::GpuMat rgbMat;
-    cv::cuda::cvtColor(gpuImg, rgbMat, cv::COLOR_BGR2RGB);
-    cv::cuda::resize(rgbMat, rgbMat, cv::Size(inputDims[0].d[1], inputDims[0].d[2]));
-    rgbMat.convertTo(rgbMat, CV_32FC3, 1.0 / 255.0);
-
-    auto resized = rgbMat; // 为什么不直接用 rgbMat 呢？ans: 下面会判断是否需要resize
-
+    
     // Convert to format expected by our inference engine
     // The reason for the strange format is because it supports models with multiple inputs as well as batching
     // In our case though, the model only has a single input and we are using a batch size of 1.
-    std::vector<cv::cuda::GpuMat> input{std::move(resized)};
+    std::vector<cv::cuda::GpuMat> input{std::move(frame)};
     std::vector<std::vector<cv::cuda::GpuMat>> inputs{std::move(input)};
 
-    std::vector<std::vector<std::vector<float>>> featureVectors;
-
-    bool succ = m_trtEngines[0]->runInference(inputs, featureVectors);
+    bool succ = m_trtEngines[0]->runInference(inputs, imageEncoderOutputTensors);
     if (!succ) {
         throw std::runtime_error("Unable to run inference.");
     }
@@ -262,24 +240,26 @@ void SAM2Tracker::imageEncoderInference(const cv::Mat& frame, std::vector<Ort::V
     // featureVectors.size(); // batch size
     // featureVectors[0].size(); // number of outputs
     // featureVectors[0][0].size(); // size of output 0
-    std::cout << "featureVectors size: " << featureVectors.size() << std::endl;
-    for (size_t i = 0; i < featureVectors[0].size(); i++) {
-        std::cout << "featureVectors[0][" << i << "] size: " << featureVectors[0][i].size() << std::endl;
-        float sum = std::accumulate(featureVectors[0][i].begin(), featureVectors[0][i].end(), 0.0f);
-        std::cout << "  sum: " << sum << ", first 10 elements: ";
-        for (size_t j = 0; j < std::min(featureVectors[0][i].size(), static_cast<size_t>(10)); j++) {
-            std::cout << featureVectors[0][i][j] << ", ";
-        }
-        std::cout << std::endl;
-    }
-    exit(0);
+    // std::cout << "featureVectors size: " << featureVectors.size() << std::endl;
+    // for (size_t i = 0; i < featureVectors[0].size(); i++) {
+    //     std::cout << "featureVectors[0][" << i << "] size: " << featureVectors[0][i].size() << std::endl;
+    //     float sum = std::accumulate(featureVectors[0][i].begin(), featureVectors[0][i].end(), 0.0f);
+    //     std::cout << "  sum: " << sum << ", first 10 elements: ";
+    //     for (size_t j = 0; j < std::min(featureVectors[0][i].size(), static_cast<size_t>(10)); j++) {
+    //     // std::cout << "  sum: " << sum << ", last 10 elements: ";
+    //     // for (size_t j = featureVectors[0][i].size() - 10; j < featureVectors[0][i].size(); j++) {
+    //         std::cout << featureVectors[0][i][j] << ", ";
+    //     }
+    //     std::cout << std::endl;
+    // }
+    // exit(0);
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
     std::cout << "image_encoder spent: " << duration.count() * 1000 << " ms" << std::endl;
 }
 
 void SAM2Tracker::memoryAttentionInference(int frameIdx,
-                                           std::vector<Ort::Value>& imageEncoderOutputTensors,
-                                           std::vector<Ort::Value>& memoryAttentionOutputTensors)
+                                           std::vector<Ort::Value> &imageEncoderOutputTensors,
+                                           std::vector<Ort::Value> &memoryAttentionOutputTensors)
 {
     auto start = std::chrono::high_resolution_clock::now();
     std::vector<float> memmaskFeatures = _memoryBank[0].maskmem_features;
@@ -496,15 +476,13 @@ cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, 
     _videoWidth = static_cast<int>(firstFrame.cols);
     _videoHeight = static_cast<int>(firstFrame.rows);
 
-    std::vector<float> inputImage;
+    cv::cuda::GpuMat inputImage;
     preprocessImage(firstFrame, inputImage);
 
     // 1) image_encoder 推理
+    std::vector<std::vector<float>> imageEncoderOutputFeatureVectors;
     std::vector<Ort::Value> imageEncoderOutputTensors;
-    
-    cv::Mat resizedFrame = firstFrame.clone();
-    cv::resize(firstFrame, resizedFrame, cv::Size(512, 512));
-    for (int i = 0; i < 5; i++)     imageEncoderInference(resizedFrame, imageEncoderOutputTensors);
+    for (int i = 0; i < 5; i++) imageEncoderInference(inputImage, imageEncoderOutputFeatureVectors);
 
     // 2) mask_decoder 推理
     std::vector<float> inputPoints = {static_cast<float>(bbox.x), static_cast<float>(bbox.y), 
@@ -596,13 +574,13 @@ cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, 
 }
 
 cv::Mat SAM2Tracker::trackStep(int frameIdx, const cv::Mat& frame) {
-    std::vector<float> inputImage;
+    cv::cuda::GpuMat inputImage;
     preprocessImage(frame, inputImage);
 
     // 1) image_encoder 推理
     std::vector<Ort::Value> imageEncoderOutputTensors;
 
-    imageEncoderInference(frame, imageEncoderOutputTensors);
+    // imageEncoderInference(inputImage, imageEncoderOutputTensors);
 
     auto lowResFeatures = imageEncoderOutputTensors[2].GetTensorMutableData<float>(); // 下面要用到两次，保留副本，因为使用std::move后，原来的数据所有权转移
     size_t lowResFeaturesSize = imageEncoderOutputTensors[2].GetTensorTypeAndShapeInfo().GetElementCount();
@@ -700,23 +678,24 @@ cv::Mat SAM2Tracker::trackStep(int frameIdx, const cv::Mat& frame) {
     return predMask;
 }
 
-void SAM2Tracker::preprocessImage(const cv::Mat& src, std::vector<float>& dest) {
+void SAM2Tracker::preprocessImage(const cv::Mat& inputImageBGR, cv::cuda::GpuMat& dest) {
     auto start = std::chrono::high_resolution_clock::now();
 
-    // // 将图像转resize到指定大小, 并转换为float, 并减去均值, 除以方差
-    // cv::Mat normalized;
-    // src.convertTo(normalized, CV_32FC3, 1.0 / 255.0);
-    // cv::subtract(normalized, _mean, normalized);
-    // cv::divide(normalized, _std, normalized)
-    // cv::Mat blob = cv::dnn::blobFromImage(normalized, 1.0, cv::Size(_imageSize, _imageSize), true, false);
-    // dest.assign((float*)blob.data, (float*)blob.data + blob.total() * blob.channels());
+    // cv::Mat resized;
+    // cv::resize(src, resized, cv::Size(_imageSize, _imageSize));
+    // cv::Mat rgbImage;
+    // cv::cvtColor(resized, rgbImage, cv::COLOR_BGR2RGB); // 转换为RGB
+    // rgbImage.convertTo(rgbImage, CV_32FC3); // 转换为float
+    // dest.assign((float*)rgbImage.data, (float*)rgbImage.data + rgbImage.total() * rgbImage.channels());
 
-    cv::Mat resized;
-    cv::resize(src, resized, cv::Size(_imageSize, _imageSize));
-    cv::Mat rgbImage;
-    cv::cvtColor(resized, rgbImage, cv::COLOR_BGR2RGB); // 转换为RGB
-    rgbImage.convertTo(rgbImage, CV_32FC3); // 转换为float
-    dest.assign((float*)rgbImage.data, (float*)rgbImage.data + rgbImage.total() * rgbImage.channels());
+    // Upload the image GPU memory
+    dest.upload(inputImageBGR);
+
+    // The model expects RGB input
+    cv::cuda::cvtColor(dest, dest, cv::COLOR_BGR2RGB);
+    cv::cuda::resize(dest, dest, cv::Size(_imageSize, _imageSize));
+
+    dest.convertTo(dest, CV_32FC3);
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
     std::cout << "preprocessImage spent: " << duration.count() * 1000 << " ms" << std::endl;
