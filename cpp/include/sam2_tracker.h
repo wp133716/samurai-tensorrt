@@ -60,26 +60,26 @@ public:
     void imageEncoderInference(const cv::cuda::GpuMat &frame, std::vector<std::vector<float>> &imageEncoderOutputTensors);
 
     void memoryAttentionInference(int frameIdx, 
-                                  std::vector<Ort::Value> &imageEncoderOutputTensors,
-                                  std::vector<Ort::Value> &memoryAttentionOutputTensors);
+                                  const std::vector<std::vector<float>> &imageEncoderOutputTensors,
+                                  std::vector<std::vector<float>> &memoryAttentionOutputTensors);
 
-    void maskDecoderInference(std::vector<float> &inputPoints,
-                              std::vector<int32_t> &inputLabels,
-                              std::vector<float> &pixFeatWithMem,
-                              std::vector<float> &highResFeatures0,
-                              std::vector<float> &highResFeatures1,
+    void maskDecoderInference(const std::vector<float> &inputPoints,
+                              const std::vector<int32_t> &inputLabels,
+                              const std::vector<float> &pixFeatWithMem,
+                              const std::vector<float> &highResFeatures0,
+                              const std::vector<float> &highResFeatures1,
                               std::vector<std::vector<float>> &maskDecoderOutputTensors);
 
-    void memoryEncoderInference(Ort::Value &visionFeaturesTensor,
-                                Ort::Value &highResMasksForMemTensor,
-                                Ort::Value &objectScoreLogitsTensor,
+    void memoryEncoderInference(const std::vector<float> &visionFeaturesTensor,
+                                const std::vector<float> &highResMasksForMemTensor,
+                                const std::vector<float> &objectScoreLogitsTensor,
                                 bool isMaskFromPts,
-                                std::vector<Ort::Value> &memoryEncoderOutputTensors);
+                                std::vector<std::vector<float>> &memoryEncoderOutputTensors);
 
     void preprocessImage(const cv::Mat &src, std::vector<float> &dest);
     void preprocessImage(const cv::Mat &inputImageBGR, cv::cuda::GpuMat &dest);
 
-    PostprocessResult postprocessOutput(std::vector<std::vector<float>> &maskDecoderOutputTensors);
+    PostprocessResult postprocessOutput(const std::vector<std::vector<float>> &maskDecoderOutputTensors);
 
 private:
     void getModelInfo(const Ort::Session* session, const std::string &modelName,
