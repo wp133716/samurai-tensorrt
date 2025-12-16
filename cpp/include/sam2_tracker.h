@@ -65,9 +65,10 @@ public:
 
     void maskDecoderInference(std::vector<float> &inputPoints,
                               std::vector<int32_t> &inputLabels,
-                              std::vector<Ort::Value> &imageEncoderOutputTensors,
-                              Ort::Value &pixFeatWithMem,
-                              std::vector<Ort::Value> &maskDecoderOutputTensors);
+                              std::vector<float> &pixFeatWithMem,
+                              std::vector<float> &highResFeatures0,
+                              std::vector<float> &highResFeatures1,
+                              std::vector<std::vector<float>> &maskDecoderOutputTensors);
 
     void memoryEncoderInference(Ort::Value &visionFeaturesTensor,
                                 Ort::Value &highResMasksForMemTensor,
@@ -78,7 +79,7 @@ public:
     void preprocessImage(const cv::Mat &src, std::vector<float> &dest);
     void preprocessImage(const cv::Mat &inputImageBGR, cv::cuda::GpuMat &dest);
 
-    PostprocessResult postprocessOutput(std::vector<Ort::Value> &maskDecoderOutputTensors);
+    PostprocessResult postprocessOutput(std::vector<std::vector<float>> &maskDecoderOutputTensors);
 
 private:
     void getModelInfo(const Ort::Session* session, const std::string &modelName,

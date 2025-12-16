@@ -443,7 +443,7 @@ bool Engine<T>::build(const std::string &onnxModelPath) {
             throw std::runtime_error("Error: GPU does not support FP16 precision");
         }
         config->setFlag(nvinfer1::BuilderFlag::kFP16);
-        config->setFlag(nvinfer1::BuilderFlag::kPREFER_PRECISION_CONSTRAINTS);
+        // config->setFlag(nvinfer1::BuilderFlag::kPREFER_PRECISION_CONSTRAINTS);
     }
 
     const auto numInputs = network->getNbInputs();
@@ -600,13 +600,21 @@ bool Engine<T>::runInference(const std::vector<std::vector<float>> &inputs,
                              std::vector<std::vector<float>> &featureVectors) {
     
     // First we do some error checking
-    if (inputs.empty() || inputs[0].empty()) {
+    if (inputs.empty()) {
         std::cout << "===== Error =====" << std::endl;
         std::cout << "Provided input vector is empty!" << std::endl;
         return false;
     }
 
     const auto numInputs = m_inputDims.size();
+
+    // 检查输入数量是否匹配
+    if (inputs.size() != numInputs) {
+        std::cout << "===== Error =====" << std::endl;
+        std::cout << "Number of inputs mismatch! Expected: " << numInputs 
+                  << ", Got: " << inputs.size() << std::endl;
+        return false;
+    }
 
     // Create the cuda stream that will be used for inference
     cudaStream_t inferenceCudaStream;
@@ -615,86 +623,141 @@ bool Engine<T>::runInference(const std::vector<std::vector<float>> &inputs,
     // 1. 准备GPU内存用于输入数据
     std::vector<void*> inputDevicePtrs(numInputs, nullptr);
     
-    // 为每个输入分配GPU内存并复制数据
-    for (size_t i = 0; i < numInputs; ++i) {
-        const auto &input = inputs[i];
-        const auto &dims = m_inputDims[i];
-        
-        // 计算每个输入的体积（元素总数）
-        size_t volume = getTotalElements(dims);
-        
-        // 分配GPU内存
-        Util::checkCudaErrorCode(cudaMalloc(&inputDevicePtrs[i], volume * sizeof(float)));
-        
-        // 复制数据到GPU
-        Util::checkCudaErrorCode(cudaMemcpyAsync(
-            static_cast<char*>(inputDevicePtrs[i]) + volume * sizeof(float),
-            input.data(),
-            volume * sizeof(float),
-            cudaMemcpyHostToDevice,
-            inferenceCudaStream
-        ));
-        
-        // 设置TensorRT输入形状
-        m_context->setInputShape(m_IOTensorNames[i].c_str(), dims);
-        
-        // 设置输入缓冲区指针
-        m_buffers[i] = inputDevicePtrs[i];
-    }
-    
-    // 确保所有动态绑定都已定义
-    if (!m_context->allInputDimensionsSpecified()) {
-        throw std::runtime_error("Error, not all required dimensions specified.");
-    }
+    try {
+        // 为每个输入分配GPU内存并复制数据
+        for (size_t i = 0; i < numInputs; ++i) {
+            const auto &input = inputs[i];
+            const auto &dims = m_inputDims[i];
 
-    // 设置输入和输出缓冲区的地址
-    for (size_t i = 0; i < m_buffers.size(); ++i) {
-        bool status = m_context->setTensorAddress(m_IOTensorNames[i].c_str(), m_buffers[i]);
-        if (!status) {
-            // 清理GPU内存
-            for (auto& ptr : inputDevicePtrs) {
-                if (ptr) cudaFree(ptr);
+            const auto tensorName = m_engine->getIOTensorName(i);
+            // const auto tensorShape = m_engine->getTensorShape(tensorName);
+            const auto tensorDataType = m_engine->getTensorDataType(tensorName);
+
+            // 计算每个输入的体积（元素总数）
+            size_t volume = getTotalElements(dims);
+            
+            // 检查输入数据大小是否匹配
+            if (input.size() != volume) {
+                std::stringstream ss;
+                ss << "Input " << i << " size mismatch! ";
+                ss << "Expected: " << volume << " elements (";
+                for (int j = 0; j < dims.nbDims; ++j) {
+                    ss << dims.d[j];
+                    if (j < dims.nbDims - 1) ss << " × ";
+                }
+                ss << "), ";
+                ss << "Got: " << input.size() << " elements";
+                throw std::runtime_error(ss.str());
             }
-            cudaStreamDestroy(inferenceCudaStream);
-            return false;
+            
+            // 分配GPU内存（单batch，所以不需要乘以batch size）
+            Util::checkCudaErrorCode(cudaMalloc(&inputDevicePtrs[i], volume * getTypeSize(tensorDataType)));
+            
+            // 调试输出
+            // std::cout << "Input " << i << ": allocating " << volume 
+            //           << " floats (" << volume * sizeof(float) 
+            //           << " bytes) at GPU ptr " << inputDevicePtrs[i] << std::endl;
+            
+            if (tensorName == std::string("point_labels")) {
+                std::vector<int32_t> input_int(inputs[i].begin(), inputs[i].end());
+                Util::checkCudaErrorCode(cudaMemcpyAsync(
+                inputDevicePtrs[i],        // 目标：GPU内存地址（无偏移）
+                input_int.data(),              // 源：CPU内存中的连续数据
+                volume * sizeof(float),    // 数据大小：所有元素
+                cudaMemcpyHostToDevice,    // 方向：CPU -> GPU
+                inferenceCudaStream        // 流
+                ));
+            }
+            else {            // 复制数据到GPU（单batch，直接复制全部数据）
+            Util::checkCudaErrorCode(cudaMemcpyAsync(
+                inputDevicePtrs[i],        // 目标：GPU内存地址（无偏移）
+                input.data(),              // 源：CPU内存中的连续数据
+                volume * sizeof(float),    // 数据大小：所有元素
+                cudaMemcpyHostToDevice,    // 方向：CPU -> GPU
+                inferenceCudaStream        // 流
+            ));
+            }
+            
+            // 设置TensorRT输入形状（单batch）
+            // 注意：dims应该已经包含了batch维度（通常是1）
+            m_context->setInputShape(m_IOTensorNames[i].c_str(), dims);
+            
+            // 设置输入缓冲区指针
+            m_buffers[i] = inputDevicePtrs[i];
         }
-    }
+        
+        // 确保所有动态绑定都已定义
+        if (!m_context->allInputDimensionsSpecified()) {
+            throw std::runtime_error("Error, not all required dimensions specified.");
+        }
 
-    // 运行推理
-    bool status = m_context->enqueueV3(inferenceCudaStream);
-    if (!status) {
+        // 设置输入和输出缓冲区的地址
+        for (size_t i = 0; i < m_buffers.size(); ++i) {
+            if (!m_buffers[i]) {
+                throw std::runtime_error("Buffer " + std::to_string(i) + " is null!");
+            }
+            
+            bool status = m_context->setTensorAddress(m_IOTensorNames[i].c_str(), m_buffers[i]);
+            if (!status) {
+                throw std::runtime_error("Failed to set tensor address for: " + m_IOTensorNames[i]);
+            }
+        }
+
+        // 运行推理（单batch）
+        // std::cout << "Executing inference..." << std::endl;
+        bool status = m_context->enqueueV3(inferenceCudaStream);
+        if (!status) {
+            throw std::runtime_error("Failed to execute inference");
+        }
+
+        // 将输出复制回CPU（单batch）
+        for (int32_t outputBinding = numInputs; outputBinding < m_engine->getNbIOTensors(); ++outputBinding) {
+            auto outputLength = m_outputLengths[outputBinding - numInputs];
+            
+            // 检查输出缓冲区是否有效
+            if (!m_buffers[outputBinding]) {
+                throw std::runtime_error("Output buffer " + std::to_string(outputBinding) + " is null");
+            }
+            
+            std::vector<float> output(outputLength);
+            
+            // 调试输出
+            // std::cout << "Output " << outputBinding - numInputs << ": copying " 
+            //           << outputLength << " floats from GPU ptr " 
+            //           << m_buffers[outputBinding] << std::endl;
+            
+            // 从GPU复制输出数据（单batch，无偏移）
+            Util::checkCudaErrorCode(cudaMemcpyAsync(
+                output.data(),                    // 目标：CPU内存
+                m_buffers[outputBinding],         // 源：GPU内存（单batch，直接使用）
+                outputLength * sizeof(float),     // 数据大小
+                cudaMemcpyDeviceToHost,           // 方向：GPU -> CPU
+                inferenceCudaStream               // 流
+            ));
+            
+            featureVectors.emplace_back(std::move(output));
+        }
+
+        // 同步CUDA流（等待所有异步操作完成）
+        // std::cout << "Synchronizing CUDA stream..." << std::endl;
+        Util::checkCudaErrorCode(cudaStreamSynchronize(inferenceCudaStream));
+        // std::cout << "Inference completed successfully!" << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cout << "===== Inference Error =====" << std::endl;
+        std::cout << e.what() << std::endl;
+        
         // 清理GPU内存
         for (auto& ptr : inputDevicePtrs) {
-            if (ptr) cudaFree(ptr);
+            if (ptr) {
+                cudaFree(ptr);
+            }
         }
+        
         cudaStreamDestroy(inferenceCudaStream);
         return false;
     }
 
-    // 将输出复制回CPU
-    for (int32_t outputBinding = numInputs; outputBinding < m_engine->getNbIOTensors(); ++outputBinding) {
-        std::vector<float> output;
-        auto outputLength = m_outputLengths[outputBinding - numInputs];
-        output.resize(outputLength);
-        
-        // 分配CPU内存用于输出
-        float* hostOutput = output.data();
-        
-        // 从GPU复制输出数据
-        Util::checkCudaErrorCode(cudaMemcpyAsync(
-            hostOutput,
-            static_cast<char *>(m_buffers[outputBinding]) + (sizeof(float) * outputLength),
-            outputLength * sizeof(float),
-            cudaMemcpyDeviceToHost,
-            inferenceCudaStream
-        ));
-        
-        featureVectors.emplace_back(std::move(output));
-    }
-
-    // 同步CUDA流
-    Util::checkCudaErrorCode(cudaStreamSynchronize(inferenceCudaStream));
-    
     // 清理GPU内存
     for (auto& ptr : inputDevicePtrs) {
         if (ptr) {

@@ -6,8 +6,8 @@ SAM2Tracker::SAM2Tracker(const std::string &onnxModelPath, const std::string &tr
     // Create our TensorRT inference engine
     Options options{Precision::FP16, "", 128, 1, 1, 0};
 
-    std::vector<std::string> onnx_models {"image_encoder.onnx", "memory_attention.onnx", "memory_encoder.onnx", "mask_decoder.onnx"};
-    std::vector<std::string> trt_models {"image_encoder.engine", "memory_attention.engine", "memory_encoder.engine", "mask_decoder.engine"};
+    std::vector<std::string> onnx_models {"image_encoder.onnx", "memory_attention.onnx", "mask_decoder.onnx", "memory_encoder.onnx"};
+    std::vector<std::string> trt_models {"image_encoder.engine", "memory_attention.engine", "mask_decoder.engine", "memory_encoder.engine"};
 
     // Build the onnx model into a TensorRT engine file, cache the file to disk, and then load the TensorRT engine file into memory.
     // If the engine file already exists on disk, this function will not rebuild but only load into memory.
@@ -230,21 +230,21 @@ void SAM2Tracker::imageEncoderInference(const std::vector<float> &frame, std::ve
 
     bool succ = m_trtEngines[0]->runInference(inputs, imageEncoderOutputTensors);
     if (!succ) {
-        throw std::runtime_error("Unable to run inference.");
+        throw std::runtime_error("Unable to run imageEncoder inference.");
     }
 
-    // featureVectors.size(); // batch size
-    // featureVectors[0].size(); // number of outputs
-    // featureVectors[0][0].size(); // size of output 0
-    // std::cout << "featureVectors size: " << featureVectors.size() << std::endl;
-    // for (size_t i = 0; i < featureVectors[0].size(); i++) {
-    //     std::cout << "featureVectors[0][" << i << "] size: " << featureVectors[0][i].size() << std::endl;
-    //     float sum = std::accumulate(featureVectors[0][i].begin(), featureVectors[0][i].end(), 0.0f);
+    // imageEncoderOutputTensors.size(); // batch size
+    // imageEncoderOutputTensors[0].size(); // number of outputs
+    // imageEncoderOutputTensors[0][0].size(); // size of output 0
+    // std::cout << "imageEncoderOutputTensors size: " << imageEncoderOutputTensors.size() << std::endl;
+    // for (size_t i = 0; i < imageEncoderOutputTensors.size(); i++) {
+    //     std::cout << "imageEncoderOutputTensors[" << i << "] size: " << imageEncoderOutputTensors[i].size() << std::endl;
+    //     float sum = std::accumulate(imageEncoderOutputTensors[i].begin(), imageEncoderOutputTensors[i].end(), 0.0f);
     //     std::cout << "  sum: " << sum << ", first 10 elements: ";
-    //     for (size_t j = 0; j < std::min(featureVectors[0][i].size(), static_cast<size_t>(10)); j++) {
+    //     for (size_t j = 0; j < std::min(imageEncoderOutputTensors[i].size(), static_cast<size_t>(10)); j++) {
     //     // std::cout << "  sum: " << sum << ", last 10 elements: ";
-    //     // for (size_t j = featureVectors[0][i].size() - 10; j < featureVectors[0][i].size(); j++) {
-    //         std::cout << featureVectors[0][i][j] << ", ";
+    //     // for (size_t j = imageEncoderOutputTensors[i].size() - 10; j < imageEncoderOutputTensors[i].size(); j++) {
+    //         std::cout << imageEncoderOutputTensors[i][j] << ", ";
     //     }
     //     std::cout << std::endl;
     // }
@@ -264,7 +264,7 @@ void SAM2Tracker::imageEncoderInference(const cv::cuda::GpuMat &frame, std::vect
 
     bool succ = m_trtEngines[0]->runInference(inputs, imageEncoderOutputTensors);
     if (!succ) {
-        throw std::runtime_error("Unable to run inference.");
+        throw std::runtime_error("Unable to run imageEncoder inference.");
     }
 
     // featureVectors.size(); // batch size
@@ -433,41 +433,42 @@ void SAM2Tracker::memoryAttentionInference(int frameIdx,
     std::cout << "memory_attention spent: " << duration.count() * 1000 << " ms" << std::endl;
 }
 
-void SAM2Tracker::maskDecoderInference(std::vector<float>& inputPoints,
-                                       std::vector<int32_t>& inputLabels,
-                                       std::vector<Ort::Value>& imageEncoderOutputTensors,
-                                       Ort::Value& pixFeatWithMem,
-                                       std::vector<Ort::Value>& maskDecoderOutputTensors)
+void SAM2Tracker::maskDecoderInference(std::vector<float> &inputPoints,
+                                       std::vector<int32_t> &inputLabels,
+                                       std::vector<float> &pixFeatWithMem,
+                                       std::vector<float> &highResFeatures0,
+                                       std::vector<float> &highResFeatures1,
+                                       std::vector<std::vector<float>> &maskDecoderOutputTensors)
 {
     auto start = std::chrono::high_resolution_clock::now();
 
-    auto memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+    std::vector<float> float_vec(inputLabels.begin(), inputLabels.end());
 
-    _maskDecoderInputNodeDims[0][1] = 2;
-    _maskDecoderInputNodeDims[1][1] = 2;
-    Ort::Value inputPointsTensor = Ort::Value::CreateTensor<float>(memoryInfo, inputPoints.data(), inputPoints.size(),
-                                                            _maskDecoderInputNodeDims[0].data(), _maskDecoderInputNodeDims[0].size());
-    Ort::Value inputLabelsTensor = Ort::Value::CreateTensor<int32_t>(memoryInfo, inputLabels.data(), inputLabels.size(),
-                                                            _maskDecoderInputNodeDims[1].data(), _maskDecoderInputNodeDims[1].size());
+    std::vector<std::vector<float>> inputValues;
+    inputValues.push_back(inputPoints);
+    inputValues.push_back(float_vec);
+    inputValues.push_back(pixFeatWithMem);
+    inputValues.push_back(highResFeatures0);
+    inputValues.push_back(highResFeatures1);
 
-    // Ort::Value videoWidthTensor  = Ort::Value::CreateTensor<int>(memoryInfo, &_videoWidth, 1,  _maskDecoderInputNodeDims[5].data(), 1);
-    // Ort::Value videoHeightTensor = Ort::Value::CreateTensor<int>(memoryInfo, &_videoHeight, 1, _maskDecoderInputNodeDims[6].data(), 1);
+    bool succ = m_trtEngines[2]->runInference(inputValues, maskDecoderOutputTensors);
+    if (!succ) {
+        throw std::runtime_error("Unable to run maskDecoder inference.");
+    }
 
-    std::vector<Ort::Value> inputTensors;
-    inputTensors.push_back(std::move(inputPointsTensor));
-    inputTensors.push_back(std::move(inputLabelsTensor));
-    inputTensors.push_back(std::move(pixFeatWithMem)); // pixFeatWithMem
-    inputTensors.push_back(std::move(imageEncoderOutputTensors[0])); // highResFeatures0
-    inputTensors.push_back(std::move(imageEncoderOutputTensors[1])); // highResFeatures1
-    // inputTensors.push_back(std::move(videoWidthTensor));
-    // inputTensors.push_back(std::move(videoHeightTensor));
+    // std::cout << "maskDecoderOutputTensors size: " << maskDecoderOutputTensors.size() << std::endl;
+    // for (size_t i = 0; i < maskDecoderOutputTensors.size(); i++) {
+    //     std::cout << "maskDecoderOutputTensors[" << i << "] size: " << maskDecoderOutputTensors[i].size() << std::endl;
+    //     float sum = std::accumulate(maskDecoderOutputTensors[i].begin(), maskDecoderOutputTensors[i].end(), 0.0f);
+    //     std::cout << "  sum: " << sum << ", first 10 elements: ";
+    //     for (size_t j = 0; j < std::min(maskDecoderOutputTensors[i].size(), static_cast<size_t>(10)); j++) {
+    //     // std::cout << "  sum: " << sum << ", last 10 elements: ";
+    //     // for (size_t j = maskDecoderOutputTensors[i].size() - 10; j < maskDecoderOutputTensors[i].size(); j++) {
+    //         std::cout << maskDecoderOutputTensors[i][j] << ", ";
+    //     }
+    //     std::cout << std::endl;
+    // }
 
-    maskDecoderOutputTensors = _maskDecoderSession->Run(Ort::RunOptions{nullptr},
-                                                                    _maskDecoderInputNodeNames.data(),
-                                                                    inputTensors.data(),
-                                                                    inputTensors.size(),
-                                                                    _maskDecoderOutputNodeNames.data(),
-                                                                    _maskDecoderOutputNodeNames.size());
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
     std::cout << "mask_decoder spent: " << duration.count() * 1000 << " ms" << std::endl;
 }
@@ -511,15 +512,15 @@ cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, 
 
     // // 1) image_encoder 推理
     // std::vector<std::vector<float>> imageEncoderOutputFeatureVectors;
-    std::vector<Ort::Value> imageEncoderOutputTensors;
-    // for (int i = 0; i < 5; i++) imageEncoderInference(inputImage, imageEncoderOutputFeatureVectors);
+    // std::vector<Ort::Value> imageEncoderOutputTensors;
+    // imageEncoderInference(inputImage, imageEncoderOutputFeatureVectors);
 
     std::vector<float> inputImage;
     preprocessImage(firstFrame, inputImage);
 
     // 1) image_encoder 推理
     std::vector<std::vector<float>> imageEncoderOutputs;
-    imageEncoderInference(inputImage, imageEncoderOutputs);
+    for (int i = 0; i < 5; i++) imageEncoderInference(inputImage, imageEncoderOutputs);
 
     // 2) mask_decoder 推理
     std::vector<float> inputPoints = {static_cast<float>(bbox.x), static_cast<float>(bbox.y), 
@@ -531,24 +532,24 @@ cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, 
 
     std::vector<int32_t> boxLabels = {2, 3};
 
-    std::vector<Ort::Value> maskDecoderOutputTensors;
+    std::vector<std::vector<float>> maskDecoderOutputs;
     maskDecoderInference(inputPoints, boxLabels,
-                         imageEncoderOutputTensors,
-                         imageEncoderOutputTensors[4],
-                         maskDecoderOutputTensors);
+                         imageEncoderOutputs[4],
+                         imageEncoderOutputs[0],
+                         imageEncoderOutputs[1],
+                         maskDecoderOutputs);
 
-    PostprocessResult result = postprocessOutput(maskDecoderOutputTensors);
+    PostprocessResult result = postprocessOutput(maskDecoderOutputs);
     int bestIoUIndex = result.bestIoUIndex;
     float bestIouScore = result.bestIouScore;
     float kfScore = result.kfScore;
 
-    auto lowResMultiMasks  = maskDecoderOutputTensors[0].GetTensorMutableData<float>();
-    // auto highResMultiMasks = maskDecoderOutputTensors[1].GetTensorMutableData<float>();
-    // auto ious              = maskDecoderOutputTensors[1].GetTensorMutableData<float>();
-    auto objPtrs           = maskDecoderOutputTensors[2].GetTensorMutableData<float>();
-    auto objScoreLogits    = maskDecoderOutputTensors[3].GetTensorMutableData<float>();
-    auto maskMemTposEncTmp = maskDecoderOutputTensors[4].GetTensorMutableData<float>(); // 7*1*1*64
-    _maskMemTposEnc = std::vector<float>(maskMemTposEncTmp, maskMemTposEncTmp + maskDecoderOutputTensors[4].GetTensorTypeAndShapeInfo().GetElementCount());
+    auto lowResMultiMasks  = maskDecoderOutputs[0].data();
+    // auto ious              = maskDecoderOutputs[1]data();
+    auto objPtrs           = maskDecoderOutputs[2].data();
+    auto objScoreLogits    = maskDecoderOutputs[3].data();
+    auto maskMemTposEncTmp = maskDecoderOutputs[4].data(); // 7*1*1*64
+    // _maskMemTposEnc = std::vector<float>(maskMemTposEncTmp, maskMemTposEncTmp + maskDecoderOutputTensors[4].GetTensorTypeAndShapeInfo().GetElementCount());
     // // check _maskMemTposEnc
     // for (int i = 0; i < _maskDecoderOutputNodeDims[4][0]; i++) { // 7
     //     std::cout << "maskMemTposEnc[" << i << "]: ";
@@ -557,14 +558,14 @@ cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, 
     //     }
     //     std::cout << std::endl;
     // }
-    int lowResMaskHeight = _maskDecoderOutputNodeDims[0][2];
-    int lowResMaskWidth  = _maskDecoderOutputNodeDims[0][3];
+    int lowResMaskHeight = 128; //_maskDecoderOutputNodeDims[0][2];
+    int lowResMaskWidth  = 128; //_maskDecoderOutputNodeDims[0][3];
     auto lowResMask = lowResMultiMasks + bestIoUIndex * lowResMaskHeight * lowResMaskWidth;
     // auto highResMask = highResMultiMasks + bestIoUIndex * _imageSize * _imageSize;
 
     cv::Mat predMask(lowResMaskHeight, lowResMaskWidth, CV_32FC1, lowResMask);
     // cv::Mat predMask(_videoHeight, _videoWidth, CV_32FC1, lowResMask);
-
+#if 0
     // 3) memory_encoder 推理
     bool isMaskFromPts = frameIdx == 0;
 
@@ -606,11 +607,13 @@ cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, 
     entry.kf_score         = kfScore;
 
     _memoryBank[frameIdx] = entry;
-
+#endif
     return predMask;
+
 }
 
 cv::Mat SAM2Tracker::trackStep(int frameIdx, const cv::Mat& frame) {
+#if 0
     cv::cuda::GpuMat inputImage;
     preprocessImage(frame, inputImage);
 
@@ -713,6 +716,7 @@ cv::Mat SAM2Tracker::trackStep(int frameIdx, const cv::Mat& frame) {
 #endif
 
     return predMask;
+#endif
 }
 
 void SAM2Tracker::preprocessImage(const cv::Mat& inputImageBGR, cv::cuda::GpuMat& dest) {
@@ -745,7 +749,7 @@ void SAM2Tracker::preprocessImage(const cv::Mat &src, std::vector<float> &dest) 
     std::cout << "preprocessImage spent: " << duration.count() * 1000 << " ms" << std::endl;
 }
 
-PostprocessResult SAM2Tracker::postprocessOutput(std::vector<Ort::Value>& maskDecoderOutputTensors) {
+PostprocessResult SAM2Tracker::postprocessOutput(std::vector<std::vector<float>> &maskDecoderOutputTensors) {
     // maskDecoderOutputTensors[0] : lowResMultiMasks，(3, videoW, videoH)
     // maskDecoderOutputTensors[1] : highResMultiMasks, (3, _imageSize, _imageSize)
     // maskDecoderOutputTensors[2] : ious, (3)
@@ -754,14 +758,13 @@ PostprocessResult SAM2Tracker::postprocessOutput(std::vector<Ort::Value>& maskDe
     // maskDecoderOutputTensors[5] : maskMemTposEnc, (7, 64)
     auto start = std::chrono::high_resolution_clock::now();
 
-    auto lowResMultiMasks = maskDecoderOutputTensors[0].GetTensorMutableData<float>();
-    // auto highResMultiMasks = maskDecoderOutputTensors[1].GetTensorMutableData<float>();
-    auto ious = maskDecoderOutputTensors[1].GetTensorMutableData<float>();
-    auto objPtr = maskDecoderOutputTensors[2].GetTensorMutableData<float>();
-    auto objScoreLogits = maskDecoderOutputTensors[3].GetTensorMutableData<float>();
-    auto maskMemTposEnc = maskDecoderOutputTensors[4].GetTensorMutableData<float>();
+    auto lowResMultiMasks = maskDecoderOutputTensors[0].data();
+    auto ious = maskDecoderOutputTensors[1].data();
+    auto objPtr = maskDecoderOutputTensors[2].data();
+    auto objScoreLogits = maskDecoderOutputTensors[3].data();
+    auto maskMemTposEnc = maskDecoderOutputTensors[4].data();
 
-    int numMasks = _maskDecoderOutputNodeDims[1][1];
+    int numMasks = 3; //_maskDecoderOutputNodeDims[1][1];
 
     // print ious
     std::cout << "ious: ";
@@ -788,7 +791,7 @@ PostprocessResult SAM2Tracker::postprocessOutput(std::vector<Ort::Value>& maskDe
         bestIouScore = ious[bestIoUIndex];
         // auto highResMask = highResMultiMasks + bestIoUIndex * _imageSize * _imageSize;
         // cv::Mat predMask(_imageSize, _imageSize, CV_32FC1, highResMask);
-        int lowResMaskSize = _maskDecoderOutputNodeDims[0][2];
+        int lowResMaskSize = 128; //_maskDecoderOutputNodeDims[0][2];
         auto lowResMask = lowResMultiMasks + bestIoUIndex * lowResMaskSize * lowResMaskSize;
         cv::Mat predMask(lowResMaskSize, lowResMaskSize, CV_32FC1, lowResMask);
 
