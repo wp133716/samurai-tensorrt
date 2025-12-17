@@ -33,4 +33,32 @@ or
 python main.py --image_path <path_to_image> --onnx_model_path <path_to_onnx_models> # 将重新构建trt engine
 ```
 
-## tensorRT C++推理版本coming soon
+## tensorRT C++推理
+
+- tensorRT 10+
+- opencv 4.10+
+
+#### 安装 tensorRT
+download [tensorrt 10.1.0](https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/10.1.0/tars/TensorRT-10.1.0.27.Linux.x86_64-gnu.cuda-11.8.tar.gz), 解压后配置环境变量
+
+```shell
+在.bashrc中添加
+# tensorRT
+export TENSORRT_DIR=/home/user/tensorRT/TensorRT-10.***.Linux.x86_64-gnu.cuda-12.5/TensorRT-10.***
+# export TENSORRT_DIR=/home/user/3rd-party/tensorRT/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8/TensorRT-10.9.0.34
+# export TENSORRT_DIR=/home/user/3rd-party/tensorRT/TensorRT-10.14.1.48.Linux.x86_64-gnu.cuda-12.9/TensorRT-10.14.1.48
+export PATH=$PATH:$TENSORRT_DIR/bin
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$TENSORRT_DIR/lib
+export LIBRARY_PATH=$LIBRARY_PATH:$TENSORRT_DIR/lib
+export C_INCLUDE_PATH=$C_INCLUDE_PATH:$TENSORRT_DIR/include
+export CPLUS_INCLUDE_PATH=$CPLUS_INCLUDE_PATH:$TENSORRT_DIR/include
+```
+
+将4个onnx模型放在 samurai_tensorrt/onnx_model 文件夹下
+#### 运行
+```shell
+cd cpp && mkdir build
+cd build
+cmake .. && make -j8
+./sam2_tracker
+```
