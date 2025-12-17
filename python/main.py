@@ -33,6 +33,15 @@ colors = [
     (36, 220, 249),  # sennelier yellow 14
 ]
 
+def timer_decorator(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        print(f"{func.__name__} 执行时间: {(end_time - start_time) * 1000:.4f}ms")
+        return result
+    return wrapper
+
 class SAM2TrackerTRT:
     def __init__(self, args):
         self.args = args
@@ -272,12 +281,14 @@ class SAM2TrackerTRT:
 
         return outputs_data
 
+    @timer_decorator
     def image_encoder_inference(self, input_image):
         '''
         Image encoder inference.
         '''
         return self.inference([input_image,], self.engines[0], self.contexts[0], self.buffers[0])
 
+    @timer_decorator
     def memory_attention_inference_test(self, frame_idx, vision_feats, vision_pos, i):
         '''
         Memory attention inference for testing.
@@ -301,6 +312,7 @@ class SAM2TrackerTRT:
                                                   self.engines[1], self.contexts[1], self.buffers[1])
         return memory_attention_outputs
 
+    @timer_decorator
     def memory_attention_inference(self, frame_idx, vision_feats, vision_pos):
         '''
         Memory attention inference.
@@ -386,6 +398,7 @@ class SAM2TrackerTRT:
 
         return memory_attention_outputs
 
+    @timer_decorator
     def memory_encoder_inference(self, vision_feats, high_res_feats, obj_score_logits, isMaskFromPts):
         '''
         Memory encoder inference.
@@ -393,6 +406,7 @@ class SAM2TrackerTRT:
         return self.inference([vision_feats, high_res_feats, obj_score_logits, isMaskFromPts],
                                self.engines[2], self.contexts[2], self.buffers[2])
 
+    @timer_decorator
     def mask_decoder_inference(self, input_points, input_labels, pixel_feat_with_memory, high_res_feats0, high_res_feats1):
         '''
         Mask decoder inference.
@@ -409,7 +423,7 @@ class SAM2TrackerTRT:
         image_encoder_outputs = self.image_encoder_inference(input_image)
         high_res_features0, high_res_features1, low_res_features, _, pix_feat_with_mem = image_encoder_outputs
         # for o in image_encoder_outputs:
-        #     print(f'image_encoder_outputs : {o.shape}, {o.sum()}, {o.min()}, {o.max()}, {o.mean()}, {o.std()}')
+        #     print(f'image_encoder_outputs : {o.shape}, {o.sum()}, {o.ravel()[-10:]}') #{o.min()}, {o.max()}, {o.mean()}, {o.std()}')
         # print()
 
         box_coords = np.array(first_frame_bbox).reshape((1, 2, 2))
@@ -424,8 +438,9 @@ class SAM2TrackerTRT:
         mask_decoder_outputs = self.mask_decoder_inference(input_points, input_labels, pix_feat_with_mem, high_res_features0, high_res_features1)
         low_res_multimasks, ious, obj_ptrs, object_score_logits, self.maskmem_tpos_enc = mask_decoder_outputs
         # for o in mask_decoder_outputs:
-        #     print(f'mask_decoder_outputs : {o.shape}, {o.sum()}, {o.min()}, {o.max()}, {o.mean()}, {o.std()}')
+        #     print(f'mask_decoder_outputs : {o.shape}, {o.sum()}, {o.ravel()[-10:]}') #{o.min()}, {o.max()}, {o.mean()}, {o.std()}')
         # print()
+        # exit(0)
 
         pred_mask, high_res_masks_for_mem, best_iou_inds, kf_score = self._forward_sam_head(mask_decoder_outputs)
 
@@ -449,6 +464,7 @@ class SAM2TrackerTRT:
 
         return pred_mask.squeeze()
 
+    @timer_decorator
     def track_step(self, frame_idx, image):
         # print(f"\033[93mframe_idx: {frame_idx}\033[0m")
 
@@ -619,11 +635,11 @@ def main(args):
         input_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
 
         if frame_idx == 0:
-            bbox = cv2.selectROI(name_window, frame) # (x, y, w, h)
-            x, y, w, h = bbox
-            first_frame_bbox = [x, y, x + w, y + h]
+            # bbox = cv2.selectROI(name_window, frame) # (x, y, w, h)
+            # x, y, w, h = bbox
+            # first_frame_bbox = [x, y, x + w, y + h]
 
-            # first_frame_bbox = load_txt(args.txt_path)[0][0]
+            first_frame_bbox = load_txt(args.txt_path)[0][0]
 
             mask = tracker.add_first_frame_bbox(0, input_image, first_frame_bbox)
         else:
@@ -702,7 +718,7 @@ def test(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--video_path", default="../assets/1917.mp4", help="Input video path or directory of frames.")
-    parser.add_argument("--txt_path", default="./first_frame_bbox.txt", help="Path to ground truth text file.")
+    parser.add_argument("--txt_path", default="../first_frame_bbox.txt", help="Path to ground truth text file.")
     parser.add_argument("--onnx_model_path", default="../onnx_model", help="Path to the onnx model.")
     parser.add_argument("--trt_engine_path", help="Path to the tensorRT model.")
     parser.add_argument("--video_output_path", default="demo.mp4", help="Path to save the output video.")
