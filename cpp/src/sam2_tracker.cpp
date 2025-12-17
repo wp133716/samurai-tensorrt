@@ -354,12 +354,12 @@ void SAM2Tracker::memoryAttentionInference(int frameIdx,
         int end = start + maskmemPosEncSize;
         // #pragma omp parallel for
         for (int j = start; j < end; j++) {
-            memmaskPosEncs[j] += _maskMemTposEnc[(i - 1) * tposEncDims.d[3] + (j % tposEncDims.d[3])];
+            memmaskPosEncs[j] += _maskMemTposEnc.at((i - 1) * tposEncDims.d[3] + (j % tposEncDims.d[3]));
         }
     }
     // #pragma omp parallel for
     for (int i = 0; i < maskmemFeaturesSize; i++) {
-        memmaskPosEncs[i] += _maskMemTposEnc[(tposEncDims.d[0] - 1) * tposEncDims.d[3] + (i % tposEncDims.d[3])];
+        memmaskPosEncs[i] += _maskMemTposEnc.at((tposEncDims.d[0] - 1) * tposEncDims.d[3] + (i % tposEncDims.d[3]));
     }
     auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start2);
     std::cout << "memmaskPosEncs spent: " << duration2.count() << " ms" << std::endl;
@@ -389,46 +389,66 @@ void SAM2Tracker::memoryAttentionInference(int frameIdx,
     }
     // std::cout << std::endl;
 
-    std::cout << "memmaskFeaturesNum: " << memmaskFeaturesNum << std::endl;
-    std::cout << "memmaskPosEncNum: " << memmaskPosEncNum << std::endl;
-    std::cout << "validIndices.size(): " << validIndices.size() << std::endl;
-    std::cout << "objectPtrs.size(): " << objectPtrs.size() / objPtrSize << std::endl;
-    std::cout << "objPosEnc.size(): " << objPosEnc.size() << std::endl;
-    std::cout << "memmaskFeatures.size(): " << memmaskFeatures.size() / maskmemFeaturesSize << ", " << memmaskFeatures.capacity() / maskmemFeaturesSize << std::endl;
-    std::cout << "memmaskPosEncs.size(): " << memmaskPosEncs.size() / maskmemPosEncSize<< ", " << memmaskPosEncs.capacity() / maskmemPosEncSize << std::endl;
-#if 0
-    auto memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    std::vector<Ort::Value> inputTensors;
+    // std::cout << "memmaskFeaturesNum: " << memmaskFeaturesNum << std::endl;
+    // std::cout << "memmaskPosEncNum: " << memmaskPosEncNum << std::endl;
+    // std::cout << "validIndices.size(): " << validIndices.size() << std::endl;
+    // std::cout << "objectPtrs.size(): " << objectPtrs.size() / objPtrSize << std::endl;
+    // std::cout << "objPosEnc.size(): " << objPosEnc.size() << std::endl;
+    // std::cout << "memmaskFeatures.size(): " << memmaskFeatures.size() / maskmemFeaturesSize << ", " << memmaskFeatures.capacity() / maskmemFeaturesSize << std::endl;
+    // std::cout << "memmaskPosEncs.size(): " << memmaskPosEncs.size() / maskmemPosEncSize<< ", " << memmaskPosEncs.capacity() / maskmemPosEncSize << std::endl;
 
-    _memoryAttentionInputNodeDims[2][1] = memmaskFeaturesNum;
-    _memoryAttentionInputNodeDims[3][1] = memmaskPosEncNum;
-    _memoryAttentionInputNodeDims[4][0] = objPosEnc.size();
-    _memoryAttentionInputNodeDims[5][0] = objPosEnc.size();
-    Ort::Value memoryTensor = Ort::Value::CreateTensor<float>(memoryInfo, memmaskFeatures.data(), memmaskFeatures.size(),
-                                                            _memoryAttentionInputNodeDims[2].data(), _memoryAttentionInputNodeDims[2].size());
-    Ort::Value memoryPosEncTensor = Ort::Value::CreateTensor<float>(memoryInfo, memmaskPosEncs.data(), memmaskPosEncs.size(),
-                                                            _memoryAttentionInputNodeDims[3].data(), _memoryAttentionInputNodeDims[3].size());
-    Ort::Value objectPtrsTensor = Ort::Value::CreateTensor<float>(memoryInfo, objectPtrs.data(), objectPtrs.size(),
-                                                            _memoryAttentionInputNodeDims[4].data(), _memoryAttentionInputNodeDims[4].size());
-    Ort::Value objPosEncTensor = Ort::Value::CreateTensor<int>(memoryInfo, objPosEnc.data(), objPosEnc.size(),
-                                                            _memoryAttentionInputNodeDims[5].data(), _memoryAttentionInputNodeDims[5].size());
-    inputTensors.clear();
-    inputTensors.push_back(std::move(imageEncoderOutputTensors[2])); // lowResFeatures
-    inputTensors.push_back(std::move(imageEncoderOutputTensors[3])); // visionPosEmbedding
-    inputTensors.push_back(std::move(memoryTensor));
-    inputTensors.push_back(std::move(memoryPosEncTensor));
-    inputTensors.push_back(std::move(objectPtrsTensor));
-    inputTensors.push_back(std::move(objPosEncTensor));
+    // auto memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+    // std::vector<Ort::Value> inputTensors;
+    std::vector<std::vector<float>> inputValues;
 
-    memoryAttentionOutputTensors = _memoryAttentionSession->Run(Ort::RunOptions{nullptr},
-                                                                    _memoryAttentionInputNodeNames.data(),
-                                                                    inputTensors.data(),
-                                                                    inputTensors.size(),
-                                                                    _memoryAttentionOutputNodeNames.data(),
-                                                                    _memoryAttentionOutputNodeNames.size());
+    // _memoryAttentionInputNodeDims[2][1] = memmaskFeaturesNum;
+    // _memoryAttentionInputNodeDims[3][1] = memmaskPosEncNum;
+    // _memoryAttentionInputNodeDims[4][0] = objPosEnc.size();
+    // _memoryAttentionInputNodeDims[5][0] = objPosEnc.size();
+    // Ort::Value memoryTensor = Ort::Value::CreateTensor<float>(memoryInfo, memmaskFeatures.data(), memmaskFeatures.size(),
+    //                                                         _memoryAttentionInputNodeDims[2].data(), _memoryAttentionInputNodeDims[2].size());
+    // Ort::Value memoryPosEncTensor = Ort::Value::CreateTensor<float>(memoryInfo, memmaskPosEncs.data(), memmaskPosEncs.size(),
+    //                                                         _memoryAttentionInputNodeDims[3].data(), _memoryAttentionInputNodeDims[3].size());
+    // Ort::Value objectPtrsTensor = Ort::Value::CreateTensor<float>(memoryInfo, objectPtrs.data(), objectPtrs.size(),
+    //                                                         _memoryAttentionInputNodeDims[4].data(), _memoryAttentionInputNodeDims[4].size());
+    // Ort::Value objPosEncTensor = Ort::Value::CreateTensor<int>(memoryInfo, objPosEnc.data(), objPosEnc.size(),
+    //                                                         _memoryAttentionInputNodeDims[5].data(), _memoryAttentionInputNodeDims[5].size());
+    inputValues.clear();
+    inputValues.push_back(std::move(imageEncoderOutputTensors[2])); // lowResFeatures
+    inputValues.push_back(std::move(imageEncoderOutputTensors[3])); // visionPosEmbedding
+    inputValues.push_back(std::move(memmaskFeatures));
+    inputValues.push_back(std::move(memmaskPosEncs));
+    inputValues.push_back(std::move(objectPtrs));
+
+    std::vector<float> float_objPosEnc(objPosEnc.begin(), objPosEnc.end());
+    inputValues.push_back(std::move(float_objPosEnc));
+
+    auto memoryAttentionInputDims = m_trtEngines[1]->getInputDims();
+    auto memmaskFeaturesDims = memoryAttentionInputDims.at(2);
+    auto memmaskPosEncsDims = memoryAttentionInputDims.at(3);
+    auto objectPtrsDims = memoryAttentionInputDims.at(4);
+    auto objPosEncDims = memoryAttentionInputDims.at(5);
+
+    memmaskFeaturesDims.d[1] = memmaskFeaturesNum;
+    memmaskPosEncsDims.d[1] = memmaskPosEncNum;
+    objectPtrsDims.d[0] = objPosEnc.size();
+    objPosEncDims.d[0] = objPosEnc.size();
+    m_trtEngines[1]->setInputDims(2, memmaskFeaturesDims);
+    m_trtEngines[1]->setInputDims(3, memmaskPosEncsDims);
+    m_trtEngines[1]->setInputDims(4, objectPtrsDims);
+    m_trtEngines[1]->setInputDims(5, objectPtrsDims);
+
+    bool succ = m_trtEngines[1]->runInference(inputValues, memoryAttentionOutputTensors);
+    if (!succ) {
+        throw std::runtime_error("Unable to run memoryAttention inference.");
+    }
+
+    // std::cout << "memoryAttentionOutputTensors size: " << memoryAttentionOutputTensors.size() << std::endl;
+    // printVector(memoryAttentionOutputTensors);
+    // exit(0);
+
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
     std::cout << "memory_attention spent: " << duration.count() * 1000 << " ms" << std::endl;
-#endif
 }
 
 void SAM2Tracker::maskDecoderInference(const std::vector<float> &inputPoints,
@@ -540,7 +560,7 @@ cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, 
     auto objPtrs           = maskDecoderOutputs[2].data();
     auto objScoreLogits    = maskDecoderOutputs[3].data();
     auto maskMemTposEncTmp = maskDecoderOutputs[4].data(); // 7*1*1*64
-    // _maskMemTposEnc = std::vector<float>(maskMemTposEncTmp, maskMemTposEncTmp + maskDecoderOutputTensors[4].GetTensorTypeAndShapeInfo().GetElementCount());
+    _maskMemTposEnc = std::vector<float>(maskMemTposEncTmp, maskMemTposEncTmp + m_trtEngines[2]->getOutputElementCount().at(4));
     // // check _maskMemTposEnc
     // for (int i = 0; i < _maskDecoderOutputNodeDims[4][0]; i++) { // 7
     //     std::cout << "maskMemTposEnc[" << i << "]: ";
@@ -753,13 +773,13 @@ PostprocessResult SAM2Tracker::postprocessOutput(const std::vector<std::vector<f
 
     int numMasks = m_trtEngines[2]->getOutputDims().at(1).d[1]; //_maskDecoderOutputNodeDims[1][1];
 
-    // print ious
-    std::cout << "ious: ";
-    for (int i = 0; i < numMasks; i++) {
-        std::cout << ious[i] << " ";
-    }
-    std::cout << std::endl;
-    std::cout << "objScoreLogits: " << *objScoreLogits << std::endl;
+    // // print ious
+    // std::cout << "ious: ";
+    // for (int i = 0; i < numMasks; i++) {
+    //     std::cout << ious[i] << " ";
+    // }
+    // std::cout << std::endl;
+    // std::cout << "objScoreLogits: " << *objScoreLogits << std::endl;
 
 #if 0 // sam2 选择ious最高的index
     int bestIoUIndex = std::distance(ious, std::max_element(ious, ious + numMasks));

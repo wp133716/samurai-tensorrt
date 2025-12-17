@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     int frameHeight = cap.get(cv::CAP_PROP_FRAME_HEIGHT); // 获取视频帧高度
 
     // cv VideoWriter_fourcc
-    cv::VideoWriter writer("output.mp4", cv::VideoWriter::fourcc('m', 'p', '4', 'v'), 30, cv::Size(frameWidth, frameHeight));
+    // cv::VideoWriter writer("output.mp4", cv::VideoWriter::fourcc('m', 'p', '4', 'v'), 30, cv::Size(frameWidth, frameHeight));
 
     int frameIdx = 0;
     cv::Mat frame;
@@ -94,24 +94,24 @@ int main(int argc, char** argv) {
         }
         cv::rectangle(frame, bbox, colors[5], 2); // 在frame上绘制bbox
 
-        auto durationStep = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startStep);
-        std::cout << "step spent: " << durationStep.count() << " ms" << std::endl;
+        auto durationStep = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startStep);
+        std::cout << "step spent: " << durationStep.count() * 1000 << " ms" << std::endl;
 
-        std::string text = "fps " + cv::format("%.1f", 1000. / float(durationStep.count())); // 计算帧率
+        std::string text = "fps " + cv::format("%.1f", 1. / float(durationStep.count())); // 计算帧率
         cv::putText(frame, text, cv::Point(20, 70), cv::FONT_HERSHEY_SIMPLEX, 1, colors[5], 2, cv::LINE_AA); // 在frame上绘制帧率
 
         cv::imshow(videoName, frame);
-        cv::imwrite(std::to_string(frameIdx) + ".jpg", frame);
-        writer.write(frame);
+        // cv::imwrite(std::to_string(frameIdx) + ".jpg", frame);
+        // writer.write(frame);
         cv::waitKey(1);
         frameIdx++;
         
     }
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "total spent: " << duration.count() << " ms" << std::endl;
-    std::cout << "average frame spent: " << duration.count() / frameIdx << " ms" << std::endl;
+    auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
+    std::cout << "total spent: " << duration.count() * 1000 << " ms" << std::endl;
+    std::cout << "average frame spent: " << duration.count() * 1000 / frameIdx << " ms" << std::endl;
     // FPS
-    std::cout << "FPS: " << frameIdx / (duration.count() / 1000.0) << std::endl;
+    std::cout << "FPS: " << frameIdx / duration.count() << std::endl;
     cap.release();
     return 0;
 }

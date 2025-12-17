@@ -150,6 +150,8 @@ public:
     [[nodiscard]] const std::vector<nvinfer1::Dims> &getOutputDims() const { return m_outputDims; };
     [[nodiscard]] const std::vector<size_t> &getOutputElementCount() const { return m_outputLengths; };
 
+    void setInputDims(int index, nvinfer1::Dims shape);
+
     // Utility method for transforming triple nested output array into 2D array
     // Should be used when the output batch size is 1, but there are multiple
     // output feature vectors
@@ -232,11 +234,21 @@ template <typename T> size_t Engine<T>::getTypeSize(nvinfer1::DataType type) {
 template <typename T> size_t Engine<T>::getTotalElements(const nvinfer1::Dims &dims) {
     // size_t total = 1;
     // for (int i = 0; i < dims.nbDims; ++i) {
-    //     total *= dims.d[i];
+    //     total *= dims.d[i] > 0 ? dims.d[i] : -dims.d[i];
     // }
     // return total;
 
     return std::accumulate(dims.d, dims.d + dims.nbDims, static_cast<size_t>(1), std::multiplies<int>());
+}
+
+template <typename T>
+void Engine<T>::setInputDims(int index, nvinfer1::Dims shape) {
+    if (shape.nbDims != m_inputDims.at(index).nbDims)
+        std::runtime_error("shape is not same");
+
+    for (int i = 0; i < shape.nbDims; ++i) {
+        m_inputDims.at(index).d[i] = shape.d[i];
+    }
 }
 
 template <typename T>
@@ -634,6 +646,8 @@ bool Engine<T>::runInference(const std::vector<std::vector<float>> &inputs,
             // const auto tensorShape = m_engine->getTensorShape(tensorName);
             const auto tensorDataType = m_engine->getTensorDataType(tensorName);
 
+            // std::cout << " tensorName : " << tensorName << std::endl;
+
             // 计算每个输入的体积（元素总数）
             size_t volume = getTotalElements(dims);
             
@@ -659,24 +673,30 @@ bool Engine<T>::runInference(const std::vector<std::vector<float>> &inputs,
             //           << " floats (" << volume * sizeof(float) 
             //           << " bytes) at GPU ptr " << inputDevicePtrs[i] << std::endl;
             
-            if (tensorName == std::string("point_labels")) {
+            if (tensorDataType == nvinfer1::DataType::kINT32)
+            {
+                // std::cout << "point_labels " << std::endl;
+                // std::cout << "tensorDataType : " << static_cast<int32_t>(tensorDataType) << std::endl;
+
                 std::vector<int32_t> input_int(inputs[i].begin(), inputs[i].end());
 
                 Util::checkCudaErrorCode(cudaMemcpyAsync(
-                inputDevicePtrs[i],        // 目标：GPU内存地址（无偏移）
+                inputDevicePtrs[i],        // 目标：GPU内存地址
                 input_int.data(),              // 源：CPU内存中的连续数据
                 volume * getTypeSize(tensorDataType),    // 数据大小：所有元素
                 cudaMemcpyHostToDevice,    // 方向：CPU -> GPU
                 inferenceCudaStream        // 流
                 ));
             }
-            else if (tensorName == std::string("is_mask_from_pts"))
+            else if (tensorName == std::string("is_mask_from_pts") && tensorDataType == nvinfer1::DataType::kBOOL)
             {
-                std::cout << "is_mask_from_pts " << std::endl;
+                // std::cout << "is_mask_from_pts " << std::endl;
+                // std::cout << "tensorDataType : " << static_cast<int32_t>(tensorDataType) << std::endl;
+
                 bool input = static_cast<bool>(inputs[i][0]);
 
                 Util::checkCudaErrorCode(cudaMemcpyAsync(
-                    inputDevicePtrs[i],        // 目标：GPU内存地址（无偏移）
+                    inputDevicePtrs[i],        // 目标：GPU内存地址
                     &input,              // 源：CPU内存中的连续数据
                     volume * getTypeSize(tensorDataType),    // 数据大小：所有元素
                     cudaMemcpyHostToDevice,    // 方向：CPU -> GPU
@@ -684,9 +704,10 @@ bool Engine<T>::runInference(const std::vector<std::vector<float>> &inputs,
                 ));
             }
             else {
+                // std::cout << "tensorDataType : " << static_cast<int32_t>(tensorDataType) << std::endl;
                 // 复制数据到GPU（单batch，直接复制全部数据）
                 Util::checkCudaErrorCode(cudaMemcpyAsync(
-                    inputDevicePtrs[i],        // 目标：GPU内存地址（无偏移）
+                    inputDevicePtrs[i],        // 目标：GPU内存地址
                     input.data(),              // 源：CPU内存中的连续数据
                     volume * getTypeSize(tensorDataType),    // 数据大小：所有元素
                     cudaMemcpyHostToDevice,    // 方向：CPU -> GPU
@@ -745,7 +766,7 @@ bool Engine<T>::runInference(const std::vector<std::vector<float>> &inputs,
             // 从GPU复制输出数据（单batch，无偏移）
             Util::checkCudaErrorCode(cudaMemcpyAsync(
                 output.data(),                    // 目标：CPU内存
-                m_buffers[outputBinding],         // 源：GPU内存（单batch，直接使用）
+                m_buffers[outputBinding],         // 源：GPU内存
                 outputLength * sizeof(float),     // 数据大小
                 cudaMemcpyDeviceToHost,           // 方向：GPU -> CPU
                 inferenceCudaStream               // 流
@@ -766,11 +787,11 @@ bool Engine<T>::runInference(const std::vector<std::vector<float>> &inputs,
         // 清理GPU内存
         for (auto& ptr : inputDevicePtrs) {
             if (ptr) {
-                cudaFree(ptr);
+                Util::checkCudaErrorCode(cudaFree(ptr));
             }
         }
         
-        cudaStreamDestroy(inferenceCudaStream);
+        Util::checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
         return false;
     }
 
