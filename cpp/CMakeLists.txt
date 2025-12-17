@@ -3,10 +3,11 @@ project(sam2_tracker)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -fPIC -O0 -ggdb -Wno-deprecated-declarations")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -fPIC -O0 -ggdb -Wno-deprecated-declarations")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -fPIC -Wno-deprecated-declarations -O2")
 
-set(CMAKE_BUILD_TYPE Debug)
-# set(CMAKE_BUILD_TYPE Release)
+# set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
 
 find_package(OpenCV REQUIRED)
 find_package(CUDA REQUIRED)
@@ -42,6 +43,3 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
                         ${CUDA_LIBRARIES}
                         # OpenMP::OpenMP_CXX
                         )
-
-# -- CUDA include dirs: /usr/local/cuda/include
-# -- CUDA libraries: /usr/local/cuda/lib64/libcudart_static.a;Threads::Threads;dl;/usr/lib/x86_64-linux-gnu/librt.a

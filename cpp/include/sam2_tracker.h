@@ -3,7 +3,7 @@
 
 #include "engine.h"
 
-#include <onnxruntime_cxx_api.h>
+// #include <onnxruntime_cxx_api.h>
 
 #include <opencv2/opencv.hpp>
 #include <eigen3/Eigen/Dense>
@@ -17,11 +17,11 @@
 
 #include "kalman_filter.h"
 
-// Utility method for checking if a file exists on disk
-inline bool doesFileExist(const std::string &name) {
-    std::ifstream f(name.c_str());
-    return f.good();
-}
+// // Utility method for checking if a file exists on disk
+// inline bool doesFileExist(const std::string &name) {
+//     std::ifstream f(name.c_str());
+//     return f.good();
+// }
 
 struct MemoryBankEntry {
     std::vector<float> maskmem_features;
@@ -82,46 +82,8 @@ public:
     PostprocessResult postprocessOutput(const std::vector<std::vector<float>> &maskDecoderOutputTensors);
 
 private:
-    void getModelInfo(const Ort::Session* session, const std::string &modelName,
-                        std::vector<const char*> &inputNodeNames,
-                        std::vector<const char*> &outputNodeNames,
-                        std::vector<std::vector<int64_t>> &inputNodeDims,
-                        std::vector<std::vector<int64_t>> &outputNodeDims);
-    void printDataType(ONNXTensorElementDataType type);
-
-    // // ONNXRuntime related
-    Ort::Env _env{ORT_LOGGING_LEVEL_WARNING, "SAM2Tracker"};
-    Ort::SessionOptions _sessionOptions{nullptr};
-
     // TensorRT Engine
     std::vector<std::unique_ptr<Engine<float>>> m_trtEngines;
-
-    std::unique_ptr<Ort::Session> _imageEncoderSession{nullptr};
-    std::unique_ptr<Ort::Session> _memoryAttentionSession{nullptr};
-    std::unique_ptr<Ort::Session> _maskDecoderSession{nullptr};
-    std::unique_ptr<Ort::Session> _memoryEncoderSession{nullptr};
-
-    std::vector<Ort::AllocatedStringPtr> _inputNodeNameAllocatedStrings;
-    std::vector<const char*> _imageEncoderInputNodeNames;
-    std::vector<const char*> _memoryAttentionInputNodeNames;
-    std::vector<const char*> _maskDecoderInputNodeNames;
-    std::vector<const char*> _memoryEncoderInputNodeNames;
-
-    std::vector<Ort::AllocatedStringPtr> _outputNodeNameAllocatedStrings;
-    std::vector<const char*> _imageEncoderOutputNodeNames;
-    std::vector<const char*> _memoryAttentionOutputNodeNames;
-    std::vector<const char*> _maskDecoderOutputNodeNames;
-    std::vector<const char*> _memoryEncoderOutputNodeNames;
-
-    std::vector<std::vector<int64_t>> _imageEncoderInputNodeDims;
-    std::vector<std::vector<int64_t>> _memoryAttentionInputNodeDims;
-    std::vector<std::vector<int64_t>> _maskDecoderInputNodeDims;
-    std::vector<std::vector<int64_t>> _memoryEncoderInputNodeDims;
-
-    std::vector<std::vector<int64_t>> _imageEncoderOutputNodeDims;
-    std::vector<std::vector<int64_t>> _memoryAttentionOutputNodeDims;
-    std::vector<std::vector<int64_t>> _maskDecoderOutputNodeDims;
-    std::vector<std::vector<int64_t>> _memoryEncoderOutputNodeDims;
 
     cv::Scalar _mean = cv::Scalar(0.485, 0.456, 0.406);
     cv::Scalar _std = cv::Scalar(0.229, 0.224, 0.225);
