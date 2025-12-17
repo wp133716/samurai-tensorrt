@@ -31,7 +31,7 @@ SAM2Tracker::SAM2Tracker(const std::string &onnxModelPath, const std::string &tr
     if (!onnxModelPath.empty()) {
         // Build the ONNX model into a TensorRT engine file
         for (const auto& model_name : onnx_models) {
-            auto trtEngine = std::make_unique<Engine<float>>(options);
+            auto trtEngine = std::make_unique<Engine>(options);
             auto succ = trtEngine->buildLoadNetwork(onnxModelPath + "/" + model_name);
             if (!succ) {
                 const std::string errMsg = "Error: Unable to build or load the TensorRT engine from ONNX model : " + model_name;
@@ -42,7 +42,7 @@ SAM2Tracker::SAM2Tracker(const std::string &onnxModelPath, const std::string &tr
     } else if (!trtModelPath.empty()) { // If no ONNX model, check for TRT model
         // Load the TensorRT engine file directly
         for (const auto& model_name : trt_models) {
-            auto trtEngine = std::make_unique<Engine<float>>(options);
+            auto trtEngine = std::make_unique<Engine>(options);
             auto succ = trtEngine->loadNetwork(trtModelPath + "/" + model_name);
             if (!succ) {
                 const std::string errMsg = "Error: Unable to load the TensorRT engine from file : " + model_name;
@@ -203,7 +203,7 @@ void SAM2Tracker::memoryAttentionInference(int frameIdx,
     // std::cout << "memmaskPosEncs.size(): " << memmaskPosEncs.size() / maskmemPosEncSize<< ", " << memmaskPosEncs.capacity() / maskmemPosEncSize << std::endl;
 
     std::vector<std::vector<float>> inputValues;
-    inputValues.reserve(6);
+    // inputValues.reserve(6);
     inputValues.push_back(std::move(imageEncoderOutputTensors[2])); // lowResFeatures
     inputValues.push_back(std::move(imageEncoderOutputTensors[3])); // visionPosEmbedding
     inputValues.push_back(std::move(memmaskFeatures));
@@ -571,7 +571,7 @@ PostprocessResult SAM2Tracker::postprocessOutput(const std::vector<std::vector<f
         cv::Mat predMask(lowResMaskSize, lowResMaskSize, CV_32FC1, const_cast<float*>(lowResMask));
 
         cv::Mat binaryMask;
-        cv::threshold(predMask, binaryMask, 0.01, 1.0, cv::THRESH_BINARY);
+        cv::threshold(predMask, binaryMask, 0.1, 1.0, cv::THRESH_BINARY);
 
         cv::Rect bbox(0, 0, 0, 0);
         std::vector<cv::Point> nonZeroPoints;

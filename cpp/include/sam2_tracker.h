@@ -83,7 +83,7 @@ public:
 
 private:
     // TensorRT Engine
-    std::vector<std::unique_ptr<Engine<float>>> m_trtEngines;
+    std::vector<std::unique_ptr<Engine>> m_trtEngines;
 
     cv::Scalar _mean = cv::Scalar(0.485, 0.456, 0.406);
     cv::Scalar _std = cv::Scalar(0.229, 0.224, 0.225);
