@@ -325,7 +325,6 @@ cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, 
                          imageEncoderOutputs[0],
                          imageEncoderOutputs[1],
                          maskDecoderOutputs);
-    std::cout << imageEncoderOutputs[4].size() << std::endl;
 
     PostprocessResult result = postprocessOutput(maskDecoderOutputs);
     int bestIoUIndex = result.bestIoUIndex;
@@ -605,7 +604,7 @@ PostprocessResult SAM2Tracker::postprocessOutput(const std::vector<std::vector<f
         cv::Mat predMask(lowResMaskSize, lowResMaskSize, CV_32FC1, const_cast<float*>(lowResMask));
 
         cv::Mat binaryMask;
-        cv::threshold(predMask, binaryMask, 0.01, 1.0, cv::THRESH_BINARY);
+        cv::threshold(predMask, binaryMask, 0.1, 1.0, cv::THRESH_BINARY);
 
         cv::Rect bbox(0, 0, 0, 0);
         std::vector<cv::Point> nonZeroPoints;
@@ -642,7 +641,7 @@ PostprocessResult SAM2Tracker::postprocessOutput(const std::vector<std::vector<f
             cv::Mat predMask(lowResMaskSize, lowResMaskSize, CV_32FC1, const_cast<float*>(lowResMask));
 
             cv::Mat binaryMask;
-            cv::threshold(predMask, binaryMask, 0.01, 1.0, cv::THRESH_BINARY);
+            cv::threshold(predMask, binaryMask, 0.1, 1.0, cv::THRESH_BINARY);
 
             cv::Rect bbox(0, 0, 0, 0);
             std::vector<cv::Point> nonZeroPoints;
