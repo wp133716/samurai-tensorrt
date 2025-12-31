@@ -11,7 +11,7 @@ set(CMAKE_BUILD_TYPE Release)
 
 find_package(OpenCV REQUIRED)
 find_package(CUDA REQUIRED)
-# find_package(TensorRT REQUIRED)
+find_package(spdlog REQUIRED)
 # find_package(OpenMP REQUIRED)
 
 # add_library(tensorrt_cpp_api SHARED
@@ -32,9 +32,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
                             # ${CUDA_INCLUDE_DIRS}
                             )
 
-# target_link_directories(${PROJECT_NAME} PRIVATE
-#                         /home/user/3rd-party/tensorRT/TensorRT-10.2.0.19.Linux.x86_64-gnu.cuda-12.5/TensorRT-10.2.0.19/lib)
-
 target_link_libraries(${PROJECT_NAME} PRIVATE
                         ${OpenCV_LIBS}
                         nvinfer
@@ -42,4 +39,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
                         onnxruntime
                         ${CUDA_LIBRARIES}
                         # OpenMP::OpenMP_CXX
+                        spdlog::spdlog
+                        )
+target_compile_definitions(${PROJECT_NAME} PRIVATE 
+                            SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG
                         )

@@ -11,7 +11,21 @@
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/cudawarping.hpp>
 #include <opencv2/opencv.hpp>
-#include <numeric>
+// #include <numeric>
+#include <spdlog/spdlog.h>
+
+#define CUDA_CHECK(call)                                                      \
+    do {                                                                      \
+        cudaError_t err__ = (call);                                           \
+        if (err__ != cudaSuccess) {                                           \
+            SPDLOG_ERROR(                                                     \
+                "CUDA operation failed with code: {} ({}), with message: {}", \
+                static_cast<int>(err__),                                      \
+                cudaGetErrorName(err__),                                      \
+                cudaGetErrorString(err__));                                   \
+            std::abort();                                                     \
+        }                                                                     \
+    } while (0)
 
 // Utility methods
 namespace Util {
@@ -24,7 +38,7 @@ inline void checkCudaErrorCode(cudaError_t code) {
     if (code != 0) {
         std::string errMsg = "CUDA operation failed with code: " + std::to_string(code) + "(" + cudaGetErrorName(code) +
                              "), with message: " + cudaGetErrorString(code);
-        std::cout << errMsg << std::endl;
+        SPDLOG_ERROR(errMsg);
         throw std::runtime_error(errMsg);
     }
 }

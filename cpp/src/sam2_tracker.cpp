@@ -66,7 +66,7 @@ void SAM2Tracker::imageEncoderInference(const std::vector<float> &frame, std::ve
     }
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "image_encoder spent: " << duration.count() * 1000 << " ms" << std::endl;
+    SPDLOG_DEBUG("image_encoder spent: {:.3f} ms", duration.count() * 1000);
 }
 
 void SAM2Tracker::imageEncoderInference(const cv::cuda::GpuMat &frame, std::vector<std::vector<float>> &imageEncoderOutputTensors) {
@@ -84,7 +84,7 @@ void SAM2Tracker::imageEncoderInference(const cv::cuda::GpuMat &frame, std::vect
     }
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "image_encoder spent: " << duration.count() * 1000 << " ms" << std::endl;
+    SPDLOG_DEBUG("image_encoder spent: {:.3f} ms", duration.count() * 1000);
 }
 
 void SAM2Tracker::memoryAttentionInference(int frameIdx,
@@ -167,7 +167,7 @@ void SAM2Tracker::memoryAttentionInference(int frameIdx,
         memmaskPosEncs[i] += _maskMemTposEnc.at((tposEncDims.d[0] - 1) * tposEncDims.d[3] + (i % tposEncDims.d[3]));
     }
     auto duration2 = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start2);
-    std::cout << "memmaskPosEncs spent: " << duration2.count() * 1000 << " ms" << std::endl;
+    SPDLOG_DEBUG("memmaskPosEncs spent: {:.3f} ms", duration2.count() * 1000);
 
     std::vector<int> objPosEnc = {frameIdx};
     // std::cout << "objPosEnc : ";
@@ -234,7 +234,7 @@ void SAM2Tracker::memoryAttentionInference(int frameIdx,
     }
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "memory_attention spent: " << duration.count() * 1000 << " ms" << std::endl;
+    SPDLOG_DEBUG("memory_attention spent: {:.3f} ms", duration.count() * 1000);
 }
 
 void SAM2Tracker::maskDecoderInference(const std::vector<float> &inputPoints,
@@ -261,7 +261,7 @@ void SAM2Tracker::maskDecoderInference(const std::vector<float> &inputPoints,
     }
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "mask_decoder spent: " << duration.count() * 1000 << " ms" << std::endl;
+    SPDLOG_DEBUG("mask_decoder spent: {:.3f} ms", duration.count() * 1000);
 }
 
 void SAM2Tracker::memoryEncoderInference(const std::vector<float> &visionFeaturesTensor,
@@ -286,7 +286,7 @@ void SAM2Tracker::memoryEncoderInference(const std::vector<float> &visionFeature
     }
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "memory_encoder spent: " << duration.count() * 1000 << " ms" << std::endl;
+    SPDLOG_DEBUG("memory_encoder spent: {:.3f} ms", duration.count() * 1000);
 }
 
 cv::Mat SAM2Tracker::addFirstFrameBbox(int frameIdx, const cv::Mat& firstFrame, const cv::Rect& bbox) {
@@ -506,7 +506,7 @@ void SAM2Tracker::preprocessImage(const cv::Mat& inputImageBGR, cv::cuda::GpuMat
     dest.convertTo(dest, CV_32FC3);
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "preprocessImage spent: " << duration.count() * 1000 << " ms" << std::endl;
+    SPDLOG_DEBUG("preprocessImage spent: {:.3f} ms", duration.count() * 1000);
 }
 
 void SAM2Tracker::preprocessImage(const cv::Mat &src, std::vector<float> &dest) {
@@ -520,7 +520,7 @@ void SAM2Tracker::preprocessImage(const cv::Mat &src, std::vector<float> &dest) 
     dest.assign((float*)rgbImage.data, (float*)rgbImage.data + rgbImage.total() * rgbImage.channels());
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "preprocessImage spent: " << duration.count() * 1000 << " ms" << std::endl;
+    SPDLOG_DEBUG("preprocessImage spent: {:.3f} ms", duration.count() * 1000);
 }
 
 PostprocessResult SAM2Tracker::postprocessOutput(const std::vector<std::vector<float>> &maskDecoderOutputTensors) {
@@ -679,7 +679,7 @@ PostprocessResult SAM2Tracker::postprocessOutput(const std::vector<std::vector<f
 #endif
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "postprocess spent: " << duration.count() * 1000 << " ms" << std::endl;
+    SPDLOG_DEBUG("postprocess spent: {:.3f} ms", duration.count() * 1000);
 
     return {bestIoUIndex, bestIouScore, kfScore};
 }

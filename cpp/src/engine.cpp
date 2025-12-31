@@ -18,13 +18,13 @@ std::vector<std::string> Util::getFilesInDirectory(const std::string &dirPath) {
 }
 
 void Logger::log(Severity severity, const char *msg) noexcept {
-    // Would advise using a proper logging utility such as
-    // https://github.com/gabime/spdlog For the sake of this tutorial, will just
-    // log to the console.
-
-    // Only log Warnings or more important.
-    if (severity <= Severity::kINFO) {
-        std::cout << msg << std::endl;
+    switch (severity) {
+        case Severity::kVERBOSE:        SPDLOG_DEBUG(msg);    break;
+        case Severity::kINFO:           SPDLOG_INFO(msg);     break;
+        case Severity::kWARNING:        SPDLOG_WARN(msg);     break;
+        case Severity::kERROR:          SPDLOG_ERROR(msg);    break;
+        case Severity::kINTERNAL_ERROR: SPDLOG_CRITICAL(msg); break;
+        default: spdlog::info("Unexpected severity level");
     }
 }
 
@@ -37,7 +37,7 @@ void Engine::clearGpuBuffers() {
         // Free GPU memory of outputs
         const auto numInputs = m_inputDims.size();
         for (int32_t outputBinding = numInputs; outputBinding < m_engine->getNbIOTensors(); ++outputBinding) {
-            Util::checkCudaErrorCode(cudaFree(m_buffers[outputBinding]));
+            CUDA_CHECK(cudaFree(m_buffers[outputBinding]));
         }
         m_buffers.clear();
     }
@@ -77,17 +77,19 @@ bool Engine::buildLoadNetwork(const std::string &onnxModelPath) {
     // Only regenerate the engine file if it has not already been generated for
     // the specified options, otherwise load cached version from disk
     const auto engineName = serializeEngineOptions(m_options, onnxModelPath);
-    std::cout << "Searching for engine file with name: " << engineName << std::endl;
+    SPDLOG_INFO("Searching for engine file with name: {}", engineName);
 
     if (Util::doesFileExist(engineName)) {
-        std::cout << "Engine found, not regenerating..." << std::endl;
+        SPDLOG_INFO("Engine found, not regenerating...");
     } else {
         if (!Util::doesFileExist(onnxModelPath)) {
-            throw std::runtime_error("Could not find onnx model at path: " + onnxModelPath);
+            std::string errMsg = "Could not find onnx model at path: " + onnxModelPath;
+            SPDLOG_ERROR(errMsg);
+            throw std::runtime_error(errMsg);
         }
 
         // Was not able to find the engine file, generate...
-        std::cout << "Engine not found, generating. This could take a while..." << std::endl;
+        SPDLOG_INFO("Engine not found, generating. This could take a while...");
 
         // Build the onnx model into a TensorRT engine
         auto ret = build(onnxModelPath);
@@ -103,10 +105,10 @@ bool Engine::buildLoadNetwork(const std::string &onnxModelPath) {
 bool Engine::loadNetwork(const std::string &trtModelPath) {
     // Read the serialized model from disk
     if (!Util::doesFileExist(trtModelPath)) {
-        std::cout << "Error, unable to read TensorRT model at path: " + trtModelPath << std::endl;
+        SPDLOG_ERROR("Error, unable to read TensorRT model at path: {}", trtModelPath);
         return false;
     } else {
-        std::cout << "Loading TensorRT engine file at path: " << trtModelPath << std::endl;
+        SPDLOG_INFO("Loading TensorRT engine file at path: {}", trtModelPath);
     }
 
     std::ifstream file(trtModelPath, std::ios::binary | std::ios::ate);
@@ -121,7 +123,7 @@ bool Engine::loadNetwork(const std::string &trtModelPath) {
     // Create a runtime to deserialize the engine file.
     m_runtime = std::unique_ptr<nvinfer1::IRuntime>{nvinfer1::createInferRuntime(m_logger)};
     if (!m_runtime) {
-        std::cout << "Error, unable to create TensorRT runtime." << std::endl;
+        SPDLOG_ERROR("Error, unable to create TensorRT runtime.");
         return false;
     }
 
@@ -138,7 +140,7 @@ bool Engine::loadNetwork(const std::string &trtModelPath) {
     // Create an engine, a representation of the optimized model.
     m_engine = std::shared_ptr<nvinfer1::ICudaEngine>(m_runtime->deserializeCudaEngine(buffer.data(), buffer.size()));
     if (!m_engine) {
-        std::cout << "Error, unable to create TensorRT engine." << std::endl;
+        SPDLOG_ERROR("Error, unable to create TensorRT engine.");
         return false;
     }
 
@@ -153,7 +155,7 @@ bool Engine::loadNetwork(const std::string &trtModelPath) {
     // This will be passed to TensorRT for inference
     clearGpuBuffers();
     m_buffers.resize(m_engine->getNbIOTensors());
-    std::cout << "Number of IO Tensors: " << m_engine->getNbIOTensors() << std::endl;
+    SPDLOG_INFO("Number of IO Tensors: {}", m_engine->getNbIOTensors());
 
     m_outputLengths.clear();
     m_inputDims.clear();
@@ -162,7 +164,7 @@ bool Engine::loadNetwork(const std::string &trtModelPath) {
 
     // Create a cuda stream
     cudaStream_t stream;
-    Util::checkCudaErrorCode(cudaStreamCreate(&stream));
+    CUDA_CHECK(cudaStreamCreate(&stream));
 
     // Allocate GPU memory for input and output buffers
     m_outputLengths.clear();
@@ -201,15 +203,15 @@ bool Engine::loadNetwork(const std::string &trtModelPath) {
             m_outputLengths.push_back(outputLength);
 
             size_t typeSize = getTypeSize(tensorDataType);
-            Util::checkCudaErrorCode(cudaMallocAsync(&m_buffers[i], outputLength * m_options.maxBatchSize * typeSize, stream));
+            CUDA_CHECK(cudaMallocAsync(&m_buffers[i], outputLength * m_options.maxBatchSize * typeSize, stream));
         } else {
             throw std::runtime_error("Error, IO Tensor is neither an input or output!");
         }
     }
 
     // Synchronize and destroy the cuda stream
-    Util::checkCudaErrorCode(cudaStreamSynchronize(stream));
-    Util::checkCudaErrorCode(cudaStreamDestroy(stream));
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+    CUDA_CHECK(cudaStreamDestroy(stream));
 
     return true;
 }
@@ -218,7 +220,7 @@ bool Engine::build(const std::string &onnxModelPath) {
     // Create our engine builder.
     auto builder = std::unique_ptr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(m_logger));
     if (!builder) {
-        std::cout << "Failed to create TensorRT builder." << std::endl;
+        SPDLOG_ERROR("Failed to create TensorRT builder.");
         return false;
     }
 
@@ -226,14 +228,14 @@ bool Engine::build(const std::string &onnxModelPath) {
     auto networkFlags = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
     auto network = std::unique_ptr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(networkFlags));
     if (!network) {
-        std::cout << "Failed to create TensorRT network." << std::endl;
+        SPDLOG_ERROR("Failed to create TensorRT network.");
         return false;
     }
 
     // Create a parser for reading the onnx file.
     auto parser = std::unique_ptr<nvonnxparser::IParser>(nvonnxparser::createParser(*network, m_logger));
     if (!parser) {
-        std::cout << "Failed to create ONNX parser." << std::endl;
+        SPDLOG_ERROR("Failed to create ONNX parser.");
         return false;
     }
 
@@ -252,13 +254,13 @@ bool Engine::build(const std::string &onnxModelPath) {
     // Parse the buffer we read into memory.
     auto parsed = parser->parse(buffer.data(), buffer.size());
     if (!parsed) {
-        std::cout << "Failed to parse ONNX model." << std::endl;
+        SPDLOG_ERROR("Failed to parse ONNX model.");
         return false;
     }
 
     auto config = std::unique_ptr<nvinfer1::IBuilderConfig>(builder->createBuilderConfig());
     if (!config) {
-        std::cout << "Failed to create TensorRT builder config." << std::endl;
+        SPDLOG_ERROR("Failed to create TensorRT builder config.");
         return false;
     }
 
@@ -279,14 +281,14 @@ bool Engine::build(const std::string &onnxModelPath) {
     }
 
     const auto numInputs = network->getNbInputs();
-    std::cout << "Number of model inputs: " << numInputs << std::endl;
+    SPDLOG_INFO("Number of model inputs: {}", numInputs);
     for (int32_t i = 0; i < numInputs; ++i) {
         // Must specify dimensions for all the inputs the model expects.
         const auto input = network->getInput(i);
         const auto inputName = input->getName();
         const auto inputDims = input->getDimensions();
-        std::cout << "Input " << i << " name: " << inputName << std::endl;
-        std::cout << "Input " << i << " dimensions: " << inputDims.nbDims << std::endl;
+        SPDLOG_INFO("Input {} name: {}", i, inputName);
+        SPDLOG_INFO("Input {} dimensions: ", i, inputDims.nbDims);
         std::cout << "Input " << i << " shape: [";
         for (int32_t d = 0; d < inputDims.nbDims; ++d) std::cout << inputDims.d[d] << ", ";
         std::cout << "]" << std::endl;
@@ -322,7 +324,7 @@ bool Engine::build(const std::string &onnxModelPath) {
 
     // CUDA stream used for profiling by the builder.
     cudaStream_t profileStream;
-    Util::checkCudaErrorCode(cudaStreamCreate(&profileStream));
+    CUDA_CHECK(cudaStreamCreate(&profileStream));
     config->setProfileStream(profileStream);
     // auto profileStream = samplesCommon::makeCudaStream();
     // if (!profileStream)
@@ -344,9 +346,9 @@ bool Engine::build(const std::string &onnxModelPath) {
     std::ofstream outfile(engineName, std::ofstream::binary);
     outfile.write(reinterpret_cast<const char *>(plan->data()), plan->size());
 
-    std::cout << "Success, saved engine to " << engineName << std::endl;
+    SPDLOG_INFO("Success, saved engine to {}", engineName);
 
-    Util::checkCudaErrorCode(cudaStreamDestroy(profileStream));
+    CUDA_CHECK(cudaStreamDestroy(profileStream));
     return true;
 }
 
@@ -354,8 +356,7 @@ bool Engine::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inpu
                              std::vector<std::vector<float>> &featureVectors) {
     // First we do some error checking
     if (inputs.empty() || inputs[0].empty()) {
-        std::cout << "===== Error =====" << std::endl;
-        std::cout << "Provided input vector is empty!" << std::endl;
+        SPDLOG_ERROR("Provided input vector is empty!");
         return false;
     }
 
@@ -365,7 +366,7 @@ bool Engine::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inpu
 
     // Create the cuda stream that will be used for inference
     cudaStream_t inferenceCudaStream;
-    Util::checkCudaErrorCode(cudaStreamCreate(&inferenceCudaStream));
+    CUDA_CHECK(cudaStreamCreate(&inferenceCudaStream));
 
     // Preprocess all the inputs
     for (size_t i = 0; i < numInputs; ++i) {
@@ -413,7 +414,7 @@ bool Engine::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inpu
             auto outputLength = m_outputLengths[outputBinding - numInputs];
             output.resize(outputLength);
             // Copy the output
-            Util::checkCudaErrorCode(cudaMemcpyAsync(output.data(),
+            CUDA_CHECK(cudaMemcpyAsync(output.data(),
                                                      static_cast<char *>(m_buffers[outputBinding]) + (batch * sizeof(float) * outputLength),
                                                      outputLength * sizeof(float), cudaMemcpyDeviceToHost, inferenceCudaStream));
             featureVectors.emplace_back(std::move(output));
@@ -421,8 +422,8 @@ bool Engine::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inpu
     }
 
     // Synchronize the cuda stream
-    Util::checkCudaErrorCode(cudaStreamSynchronize(inferenceCudaStream));
-    Util::checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
+    CUDA_CHECK(cudaStreamSynchronize(inferenceCudaStream));
+    CUDA_CHECK(cudaStreamDestroy(inferenceCudaStream));
     return true;
 }
 
@@ -431,8 +432,7 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
     
     // First we do some error checking
     if (inputs.empty()) {
-        std::cout << "===== Error =====" << std::endl;
-        std::cout << "Provided input vector is empty!" << std::endl;
+        SPDLOG_ERROR("Provided input vector is empty!");
         return false;
     }
 
@@ -440,15 +440,13 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
 
     // 检查输入数量是否匹配
     if (inputs.size() != numInputs) {
-        std::cout << "===== Error =====" << std::endl;
-        std::cout << "Number of inputs mismatch! Expected: " << numInputs 
-                  << ", Got: " << inputs.size() << std::endl;
+        SPDLOG_ERROR("Number of inputs mismatch! Expected: {}, Got: ", numInputs, inputs.size());
         return false;
     }
 
     // Create the cuda stream that will be used for inference
     cudaStream_t inferenceCudaStream;
-    Util::checkCudaErrorCode(cudaStreamCreate(&inferenceCudaStream));
+    CUDA_CHECK(cudaStreamCreate(&inferenceCudaStream));
     
     // 1. 准备GPU内存用于输入数据
     std::vector<void*> inputDevicePtrs(numInputs, nullptr);
@@ -463,7 +461,7 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
             // const auto tensorShape = m_engine->getTensorShape(tensorName);
             const auto tensorDataType = m_engine->getTensorDataType(tensorName);
 
-            // std::cout << " tensorName : " << tensorName << std::endl;
+            SPDLOG_DEBUG(" tensorName : {}", tensorName);
 
             // 计算每个输入的体积（元素总数）
             size_t volume = getTotalElements(dims);
@@ -483,7 +481,7 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
             }
             
             // 分配GPU内存（单batch，所以不需要乘以batch size）
-            Util::checkCudaErrorCode(cudaMalloc(&inputDevicePtrs[i], volume * getTypeSize(tensorDataType)));
+            CUDA_CHECK(cudaMalloc(&inputDevicePtrs[i], volume * getTypeSize(tensorDataType)));
             
             // 调试输出
             // std::cout << "Input " << i << ": allocating " << volume 
@@ -497,7 +495,7 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
 
                 std::vector<int32_t> input_int(inputs[i].begin(), inputs[i].end());
 
-                Util::checkCudaErrorCode(cudaMemcpyAsync(
+                CUDA_CHECK(cudaMemcpyAsync(
                 inputDevicePtrs[i],        // 目标：GPU内存地址
                 input_int.data(),              // 源：CPU内存中的连续数据
                 volume * getTypeSize(tensorDataType),    // 数据大小：所有元素
@@ -512,7 +510,7 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
 
                 bool input = static_cast<bool>(inputs[i][0]);
 
-                Util::checkCudaErrorCode(cudaMemcpyAsync(
+                CUDA_CHECK(cudaMemcpyAsync(
                     inputDevicePtrs[i],        // 目标：GPU内存地址
                     &input,              // 源：CPU内存中的连续数据
                     volume * getTypeSize(tensorDataType),    // 数据大小：所有元素
@@ -523,7 +521,7 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
             else {
                 // std::cout << "tensorDataType : " << static_cast<int32_t>(tensorDataType) << std::endl;
                 // 复制数据到GPU（单batch，直接复制全部数据）
-                Util::checkCudaErrorCode(cudaMemcpyAsync(
+                CUDA_CHECK(cudaMemcpyAsync(
                     inputDevicePtrs[i],        // 目标：GPU内存地址
                     input.data(),              // 源：CPU内存中的连续数据
                     volume * getTypeSize(tensorDataType),    // 数据大小：所有元素
@@ -581,7 +579,7 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
             //           << m_buffers[outputBinding] << std::endl;
             
             // 从GPU复制输出数据（单batch，无偏移）
-            Util::checkCudaErrorCode(cudaMemcpyAsync(
+            CUDA_CHECK(cudaMemcpyAsync(
                 output.data(),                    // 目标：CPU内存
                 m_buffers[outputBinding],         // 源：GPU内存
                 outputLength * sizeof(float),     // 数据大小
@@ -594,32 +592,31 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
 
         // 同步CUDA流（等待所有异步操作完成）
         // std::cout << "Synchronizing CUDA stream..." << std::endl;
-        Util::checkCudaErrorCode(cudaStreamSynchronize(inferenceCudaStream));
+        CUDA_CHECK(cudaStreamSynchronize(inferenceCudaStream));
         // std::cout << "Inference completed successfully!" << std::endl;
         
     } catch (const std::exception& e) {
-        std::cout << "===== Inference Error =====" << std::endl;
-        std::cout << e.what() << std::endl;
+        SPDLOG_ERROR("===== Inference Error ===== {}", e.what());
         
         // 清理GPU内存
         for (auto& ptr : inputDevicePtrs) {
             if (ptr) {
-                Util::checkCudaErrorCode(cudaFree(ptr));
+                CUDA_CHECK(cudaFree(ptr));
             }
         }
         
-        Util::checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
+        CUDA_CHECK(cudaStreamDestroy(inferenceCudaStream));
         return false;
     }
 
     // 清理GPU内存
     for (auto& ptr : inputDevicePtrs) {
         if (ptr) {
-            Util::checkCudaErrorCode(cudaFree(ptr));
+            CUDA_CHECK(cudaFree(ptr));
         }
     }
     
-    Util::checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
+    CUDA_CHECK(cudaStreamDestroy(inferenceCudaStream));
     return true;
 }
 

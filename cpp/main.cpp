@@ -21,18 +21,22 @@ std::vector<cv::Scalar> colors = {
 };
 
 int main(int argc, char** argv) {
+    // 设置pattern，包含：时间、日志级别、文件名、函数名、行号、消息
+    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%s:%# %!] %v");
+    spdlog::set_level(spdlog::level::debug);
+
     std::string onnxModelPath = "../../onnx_model";
     std::string videoPath = "../../assets/1917.mp4";
 
     if (argc > 1) {
         onnxModelPath = argv[1];
     }
-    std::cout << "Using onnx model path: " << onnxModelPath << std::endl;
+    SPDLOG_INFO("Using onnx model path: {}", onnxModelPath);
 
     if (argc > 2) {
         videoPath = argv[2];
     }
-    std::cout << "Using video path: " << videoPath << std::endl;
+    SPDLOG_INFO("Using video path: {}", videoPath);
 
     // SAM2Tracker tracker(modelPath, true, true);
     SAM2Tracker tracker(onnxModelPath, std::string{}, SAM2Config{});
@@ -46,8 +50,8 @@ int main(int argc, char** argv) {
     // 获取videoPath的文件名
     std::string videoName = videoPath.substr(videoPath.find_last_of("/\\") + 1);  // 1917-1.mp4
     // videoName = videoName.substr(0, videoName.find_last_of(".")); // 1917-1
-    // std::cout << "videoName: " << videoName << std::endl;
-    std::cout << "start tracking video: " << videoName << std::endl;
+
+    SPDLOG_INFO("start tracking video: {}", videoName);
     cv::namedWindow(videoName, cv::WINDOW_NORMAL); // 创建以videoName为名的窗口
 
     int numframes = cap.get(cv::CAP_PROP_FRAME_COUNT);    // 获取视频帧数
@@ -63,12 +67,12 @@ int main(int argc, char** argv) {
     auto start = std::chrono::high_resolution_clock::now();
     while(cap.read(frame)){
         auto startStep = std::chrono::high_resolution_clock::now();
-        std::cout << "\033[32mframeIdx: " << frameIdx << "\033[0m" << std::endl;
+        SPDLOG_INFO("\033[32mframeIdx: {}\033[0m", frameIdx);
         if(frameIdx == 0){
             // cv select roi
             // cv::Rect firstBbox = cv::selectROI(videoName, frame);
             cv::Rect firstBbox(384, 304, 342, 316);
-            std::cout << "first_bbox (x, y, w, h): " << firstBbox.x << ", " << firstBbox.y << ", " << firstBbox.width << ", " << firstBbox.height << std::endl;
+            SPDLOG_INFO("first_bbox (x, y, w, h): {}, {}, {}, {}", firstBbox.x, firstBbox.y, firstBbox.width, firstBbox.height);
             predMask = tracker.addFirstFrameBbox(frameIdx, frame, firstBbox);
         } else {
             predMask = tracker.trackStep(frameIdx, frame);
@@ -95,7 +99,7 @@ int main(int argc, char** argv) {
         cv::rectangle(frame, bbox, colors[5], 2); // 在frame上绘制bbox
 
         auto durationStep = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startStep);
-        std::cout << "step spent: " << durationStep.count() * 1000 << " ms" << std::endl;
+        SPDLOG_DEBUG("step spent: {:.3f} ms", durationStep.count() * 1000);
 
         std::string text = "fps " + cv::format("%.1f", 1. / float(durationStep.count())); // 计算帧率
         cv::putText(frame, text, cv::Point(20, 70), cv::FONT_HERSHEY_SIMPLEX, 1, colors[5], 2, cv::LINE_AA); // 在frame上绘制帧率
@@ -108,10 +112,10 @@ int main(int argc, char** argv) {
         
     }
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "total spent: " << duration.count() * 1000 << " ms" << std::endl;
-    std::cout << "average frame spent: " << duration.count() * 1000 / frameIdx << " ms" << std::endl;
+    SPDLOG_DEBUG("total spent: {:.3f} ms", duration.count() * 1000);
+    SPDLOG_DEBUG("average frame spent: {:.3f} ms", duration.count() * 1000 / frameIdx);
     // FPS
-    std::cout << "FPS: " << frameIdx / duration.count() << std::endl;
+    SPDLOG_DEBUG("FPS: {}",  frameIdx / duration.count());
     cap.release();
     return 0;
 }
