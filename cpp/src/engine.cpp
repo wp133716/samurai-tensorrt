@@ -117,7 +117,9 @@ bool Engine::loadNetwork(const std::string &trtModelPath) {
 
     std::vector<char> buffer(size);
     if (!file.read(buffer.data(), size)) {
-        throw std::runtime_error("Unable to read engine file");
+        std::string errMsg = "Unable to read engine file: " + trtModelPath;
+        SPDLOG_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
     }
 
     // Create a runtime to deserialize the engine file.
@@ -134,6 +136,7 @@ bool Engine::loadNetwork(const std::string &trtModelPath) {
         cudaGetDeviceCount(&numGPUs);
         auto errMsg = "Unable to set GPU device index to: " + std::to_string(m_options.deviceIndex) + ". Note, your device has " +
                       std::to_string(numGPUs) + " CUDA-capable GPU(s).";
+        SPDLOG_ERROR(errMsg);
         throw std::runtime_error(errMsg);
     }
 
@@ -205,7 +208,9 @@ bool Engine::loadNetwork(const std::string &trtModelPath) {
             size_t typeSize = getTypeSize(tensorDataType);
             CUDA_CHECK(cudaMallocAsync(&m_buffers[i], outputLength * m_options.maxBatchSize * typeSize, stream));
         } else {
-            throw std::runtime_error("Error, IO Tensor is neither an input or output!");
+            std::string errMsg = "Error, IO Tensor is neither an input or output!";
+            SPDLOG_ERROR(errMsg);
+            throw std::runtime_error(errMsg);
         }
     }
 
@@ -248,7 +253,9 @@ bool Engine::build(const std::string &onnxModelPath) {
 
     std::vector<char> buffer(size);
     if (!file.read(buffer.data(), size)) {
-        throw std::runtime_error("Unable to read engine file");
+        std::string errMsg = "Unable to read onnx file: " + onnxModelPath;
+        SPDLOG_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
     }
 
     // Parse the buffer we read into memory.
@@ -274,7 +281,9 @@ bool Engine::build(const std::string &onnxModelPath) {
     if (m_options.precision == Precision::FP16) {
         // Ensure the GPU supports FP16 inference
         if (!builder->platformHasFastFp16()) {
-            throw std::runtime_error("Error: GPU does not support FP16 precision");
+            std::string errMsg = "Error: GPU does not support FP16 precision";
+            SPDLOG_ERROR(errMsg);
+            throw std::runtime_error(errMsg);
         }
         config->setFlag(nvinfer1::BuilderFlag::kFP16);
         // config->setFlag(nvinfer1::BuilderFlag::kPREFER_PRECISION_CONSTRAINTS);
@@ -382,7 +391,9 @@ bool Engine::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inpu
 
     // Ensure all dynamic bindings have been defined.
     if (!m_context->allInputDimensionsSpecified()) {
-        throw std::runtime_error("Error, not all required dimensions specified.");
+        std::string errMsg = "Error, not all required dimensions specified.";
+        SPDLOG_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
     }
 
     // Set the address of the input and output buffers
@@ -540,18 +551,24 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
         
         // 确保所有动态绑定都已定义
         if (!m_context->allInputDimensionsSpecified()) {
-            throw std::runtime_error("Error, not all required dimensions specified.");
+            std::string errMsg = "Error, not all required dimensions specified.";
+            SPDLOG_ERROR(errMsg);
+            throw std::runtime_error(errMsg);
         }
 
         // 设置输入和输出缓冲区的地址
         for (size_t i = 0; i < m_buffers.size(); ++i) {
             if (!m_buffers[i]) {
-                throw std::runtime_error("Buffer " + std::to_string(i) + " is null!");
+                std::string errMsg = "Buffer " + std::to_string(i) + " is null!";
+                SPDLOG_ERROR(errMsg);
+                throw std::runtime_error(errMsg);
             }
             
             bool status = m_context->setTensorAddress(m_IOTensorNames[i].c_str(), m_buffers[i]);
             if (!status) {
-                throw std::runtime_error("Failed to set tensor address for: " + m_IOTensorNames[i]);
+                std::string errMsg = "Failed to set tensor address for: " + m_IOTensorNames[i];
+                SPDLOG_ERROR(errMsg);
+                throw std::runtime_error(errMsg);
             }
         }
 
@@ -559,7 +576,9 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
         // std::cout << "Executing inference..." << std::endl;
         bool status = m_context->enqueueV3(inferenceCudaStream);
         if (!status) {
-            throw std::runtime_error("Failed to execute inference");
+            std::string errMsg = "Failed to execute inference";
+            SPDLOG_ERROR(errMsg);
+            throw std::runtime_error(errMsg);
         }
 
         // 将输出复制回CPU（单batch）
@@ -568,7 +587,9 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
             
             // 检查输出缓冲区是否有效
             if (!m_buffers[outputBinding]) {
-                throw std::runtime_error("Output buffer " + std::to_string(outputBinding) + " is null");
+                std::string errMsg = "Output buffer " + std::to_string(outputBinding) + " is null";
+                SPDLOG_ERROR(errMsg);
+                throw std::runtime_error(errMsg);
             }
             
             std::vector<float> output(outputLength);
@@ -659,7 +680,9 @@ std::string Engine::serializeEngineOptions(const Options &options, const std::st
     getDeviceNames(deviceNames);
 
     if (static_cast<size_t>(options.deviceIndex) >= deviceNames.size()) {
-        throw std::runtime_error("Error, provided device index is out of range!");
+        std::string errMsg = "Error, provided device index is out of range!";
+        SPDLOG_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
     }
 
     auto deviceName = deviceNames[options.deviceIndex];
@@ -709,7 +732,9 @@ cv::cuda::GpuMat Engine::resizeKeepAspectRatioPadRightBottom(const cv::cuda::Gpu
 
 void Engine::transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output) {
     if (input.size() != 1) {
-        throw std::logic_error("The feature vector has incorrect dimensions!");
+        std::string errMsg = "The feature vector has incorrect dimensions!";
+        SPDLOG_ERROR(errMsg);
+        throw std::logic_error(errMsg);
     }
 
     output = std::move(input[0]);
@@ -717,7 +742,9 @@ void Engine::transformOutput(std::vector<std::vector<std::vector<float>>> &input
 
 void Engine::transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output) {
     if (input.size() != 1 || input[0].size() != 1) {
-        throw std::logic_error("The feature vector has incorrect dimensions!");
+        std::string errMsg = "The feature vector has incorrect dimensions!";
+        SPDLOG_ERROR(errMsg);
+        throw std::logic_error(errMsg);
     }
 
     output = std::move(input[0][0]);
