@@ -65,8 +65,11 @@ size_t Engine::getTotalElements(const nvinfer1::Dims &dims) {
 }
 
 void Engine::setInputDims(int index, nvinfer1::Dims shape) {
-    if (shape.nbDims != m_inputDims.at(index).nbDims)
-        std::runtime_error("shape is not same");
+    if (shape.nbDims != m_inputDims.at(index).nbDims) {
+        std::string errMsg = "Error, provided shape has incorrect number of dimensions!";
+        SPDLOG_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
+    }
 
     for (int i = 0; i < shape.nbDims; ++i) {
         m_inputDims.at(index).d[i] = shape.d[i];
@@ -519,11 +522,11 @@ bool Engine::runInference(const std::vector<std::vector<float>> &inputs,
                 // std::cout << "is_mask_from_pts " << std::endl;
                 // std::cout << "tensorDataType : " << static_cast<int32_t>(tensorDataType) << std::endl;
 
-                bool input = static_cast<bool>(inputs[i][0]);
+                bool input_bool = static_cast<bool>(inputs[i][0]);
 
                 CUDA_CHECK(cudaMemcpyAsync(
                     inputDevicePtrs[i],        // 目标：GPU内存地址
-                    &input,              // 源：CPU内存中的连续数据
+                    &input_bool,              // 源：CPU内存中的连续数据
                     volume * getTypeSize(tensorDataType),    // 数据大小：所有元素
                     cudaMemcpyHostToDevice,    // 方向：CPU -> GPU
                     inferenceCudaStream        // 流
