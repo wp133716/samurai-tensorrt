@@ -35,6 +35,7 @@ SAM2Tracker::SAM2Tracker(const std::string &onnxModelPath, const std::string &tr
             auto succ = trtEngine->buildLoadNetwork(onnxModelPath + "/" + model_name);
             if (!succ) {
                 const std::string errMsg = "Error: Unable to build or load the TensorRT engine from ONNX model : " + model_name;
+                SPDLOG_ERROR(errMsg);
                 throw std::runtime_error(errMsg);
             }
             m_trtEngines.push_back(std::move(trtEngine));
@@ -46,12 +47,15 @@ SAM2Tracker::SAM2Tracker(const std::string &onnxModelPath, const std::string &tr
             auto succ = trtEngine->loadNetwork(trtModelPath + "/" + model_name);
             if (!succ) {
                 const std::string errMsg = "Error: Unable to load the TensorRT engine from file : " + model_name;
+                SPDLOG_ERROR(errMsg);
                 throw std::runtime_error(errMsg);
             }
             m_trtEngines.push_back(std::move(trtEngine));
         }
     } else {
-        throw std::runtime_error("Error: Neither ONNX model nor TensorRT engine path provided.");
+        std::string errMsg = "Error: Neither ONNX model nor TensorRT engine path provided.";
+        SPDLOG_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
     }
 }
 
@@ -62,7 +66,9 @@ void SAM2Tracker::imageEncoderInference(const std::vector<float> &frame, std::ve
 
     bool succ = m_trtEngines[0]->runInference(inputs, imageEncoderOutputTensors);
     if (!succ) {
-        throw std::runtime_error("Unable to run imageEncoder inference.");
+        std::string errMsg = "Unable to run imageEncoder inference.";
+        SPDLOG_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
     }
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
@@ -80,7 +86,9 @@ void SAM2Tracker::imageEncoderInference(const cv::cuda::GpuMat &frame, std::vect
 
     bool succ = m_trtEngines[0]->runInference(inputs, imageEncoderOutputTensors);
     if (!succ) {
-        throw std::runtime_error("Unable to run imageEncoder inference.");
+        std::string errMsg = "Unable to run imageEncoder inference.";
+        SPDLOG_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
     }
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
@@ -230,7 +238,9 @@ void SAM2Tracker::memoryAttentionInference(int frameIdx,
 
     bool succ = m_trtEngines[1]->runInference(inputValues, memoryAttentionOutputTensors);
     if (!succ) {
-        throw std::runtime_error("Unable to run memoryAttention inference.");
+        std::string errMsg = "Unable to run memoryAttention inference.";
+        SPDLOG_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
     }
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
@@ -257,7 +267,9 @@ void SAM2Tracker::maskDecoderInference(const std::vector<float> &inputPoints,
 
     bool succ = m_trtEngines[2]->runInference(inputValues, maskDecoderOutputTensors);
     if (!succ) {
-        throw std::runtime_error("Unable to run maskDecoder inference.");
+        std::string errMsg = "Unable to run maskDecoder inference.";
+        SPDLOG_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
     }
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
@@ -282,7 +294,9 @@ void SAM2Tracker::memoryEncoderInference(const std::vector<float> &visionFeature
 
     bool succ = m_trtEngines[3]->runInference(inputValues, memoryEncoderOutputTensors);
     if (!succ) {
-        throw std::runtime_error("Unable to run memoryEncoder inference.");
+        std::string errMsg = "Unable to run memoryEncoder inference.";
+        SPDLOG_ERROR(errMsg);
+        throw std::runtime_error(errMsg);
     }
 
     auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start);
