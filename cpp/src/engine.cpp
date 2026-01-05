@@ -24,7 +24,7 @@ void Logger::log(Severity severity, const char *msg) noexcept {
         case Severity::kWARNING:        SPDLOG_WARN(msg);     break;
         case Severity::kERROR:          SPDLOG_ERROR(msg);    break;
         case Severity::kINTERNAL_ERROR: SPDLOG_CRITICAL(msg); break;
-        default: spdlog::info("Unexpected severity level");
+        default: SPDLOG_INFO("Unexpected severity level");
     }
 }
 
