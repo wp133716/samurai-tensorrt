@@ -144,7 +144,7 @@ bool Engine::loadNetwork(const std::string &trtModelPath) {
     }
 
     // Create an engine, a representation of the optimized model.
-    m_engine = std::shared_ptr<nvinfer1::ICudaEngine>(m_runtime->deserializeCudaEngine(buffer.data(), buffer.size()));
+    m_engine = std::unique_ptr<nvinfer1::ICudaEngine>(m_runtime->deserializeCudaEngine(buffer.data(), buffer.size()));
     if (!m_engine) {
         SPDLOG_ERROR("Error, unable to create TensorRT engine.");
         return false;
