@@ -66,7 +66,8 @@ size_t Engine::getTotalElements(const nvinfer1::Dims &dims) {
 
 void Engine::setInputDims(int index, nvinfer1::Dims shape) {
     if (shape.nbDims != m_inputDims.at(index).nbDims) {
-        std::string errMsg = "Error, provided shape has incorrect number of dimensions!";
+        std::string errMsg = "Error, provided shape has incorrect number of dimensions! Expected: " +
+                             std::to_string(m_inputDims.at(index).nbDims) + ", got: " + std::to_string(shape.nbDims);
         SPDLOG_ERROR(errMsg);
         throw std::runtime_error(errMsg);
     }

@@ -234,7 +234,7 @@ void SAM2Tracker::memoryAttentionInference(int frameIdx,
     m_trtEngines[1]->setInputDims(2, memmaskFeaturesDims);
     m_trtEngines[1]->setInputDims(3, memmaskPosEncsDims);
     m_trtEngines[1]->setInputDims(4, objectPtrsDims);
-    m_trtEngines[1]->setInputDims(5, objectPtrsDims);
+    m_trtEngines[1]->setInputDims(5, objPosEncDims);
 
     bool succ = m_trtEngines[1]->runInference(inputValues, memoryAttentionOutputTensors);
     if (!succ) {
